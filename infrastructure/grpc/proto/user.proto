@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = ".;proto";
+
+// 用户信息服务
+service UserInfoService {
+  // 根据用户ID查询用户信息
+  rpc GetUserById(GetUserByIdReq) returns (UserInfoReply) {}
+  // 根据警号查询用户信息
+  rpc GetUserByPoliceNo(GetUserByPoliceNoReq) returns (UserInfoReply) {}
+}
+
+// 根据用户ID查询请求
+message GetUserByIdReq {
+  string tenant_id = 1;  // 租户ID，用于多租户系统
+  int32 user_id = 2;     // 用户唯一ID
+}
+
+// 根据警号查询请求
+message GetUserByPoliceNoReq {
+  string tenant_id = 1;  // 租户ID，用于多租户系统
+  string police_no = 2;  // 警号
+}
+
+// 用户信息响应，字段与领域模型SysUser对应
+message UserInfoReply {
+  int32 user_id = 1;
+  string user_name = 2;
+  string police_no = 3;
+  string phone = 4;
+  int32 role_id = 5;
+  string avatar = 6;
+  string sex = 7;
+  string email = 8;
+  int32 org_id = 9;
+  int32 post_id = 10;
+  string remark = 11;
+  string status = 12;
+  string created_at = 13;
+  string updated_at = 14;
+  // 关联信息
+  OrgInfo org = 15;
+  PostInfo post = 16;
+  RoleInfo role = 17;
+}
+
+// 组织信息
+message OrgInfo {
+  int32 org_id = 1;
+  string org_name = 2;
+}
+
+// 岗位信息
+message PostInfo {
+  int32 post_id = 1;
+  string post_name = 2;
+}
+
+// 角色信息
+message RoleInfo {
+  int32 role_id = 1;
+  string role_name = 2;
+}

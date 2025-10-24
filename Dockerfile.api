@@ -1,0 +1,17 @@
+FROM alpine:latest
+
+WORKDIR /app
+
+# 安装 curl 用于健康检查
+RUN apk --no-cache add curl ca-certificates
+
+# 复制预构建的二进制文件
+COPY api .
+
+# 暴露端口
+EXPOSE 8003
+
+# 启动应用
+CMD ["./api"]
+
+

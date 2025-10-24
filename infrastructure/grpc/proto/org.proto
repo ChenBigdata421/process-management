@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package org;
+
+option go_package = ".;proto";
+
+// 组织信息服务
+service OrgInfoService {
+  // 根据组织ID查询组织信息
+  rpc GetOrgById(GetOrgByIdReq) returns (OrgInfoReply) {}
+  // 根据组织编码查询组织信息
+  rpc GetOrgByCode(GetOrgByCodeReq) returns (OrgInfoReply) {}
+  // 根据组织名称查询组织信息
+  rpc GetOrgByName(GetOrgByNameReq) returns (OrgInfoReply) {}
+  // 获取组织全名（包含上级路径）
+  rpc GetOrgFullName(GetOrgFullNameReq) returns (OrgFullNameReply) {}
+}
+
+// 根据组织ID查询请求
+message GetOrgByIdReq {
+  string tenant_id = 1;  // 租户ID，用于多租户系统
+  int32 org_id = 2;      // 组织唯一ID
+}
+
+// 根据组织编码查询请求
+message GetOrgByCodeReq {
+  string tenant_id = 1;  // 租户ID，用于多租户系统
+  string org_code = 2;   // 组织编码
+}
+
+// 根据组织名称查询请求
+message GetOrgByNameReq {
+  string tenant_id = 1;  // 租户ID，用于多租户系统
+  string org_name = 2;   // 组织名称
+}
+
+// 获取组织全名请求
+message GetOrgFullNameReq {
+  string tenant_id = 1;  // 租户ID，用于多租户系统
+  int32 org_id = 2;      // 组织ID
+}
+
+// 组织信息响应，字段与领域模型SysOrg对应
+message OrgInfoReply {
+  int32 org_id = 1;        // 组织ID
+  int32 parent_id = 2;     // 上级单位ID
+  string org_path = 3;     // 单位ID路径
+  string org_code = 4;     // 单位编码
+  string org_name = 5;     // 单位名称
+  string org_name_jc = 6;  // 单位简称
+  string org_type = 7;     // 单位类型
+  string region = 8;       // 区域
+  int32 sort = 9;          // 排序
+  string leader = 10;      // 单位负责人
+  string phone = 11;       // 负责人手机
+  string email = 12;       // 负责人邮箱
+  string status = 13;       // 状态
+  string created_at = 14;  // 创建时间
+  string updated_at = 15;  // 更新时间
+  // 关联信息
+  OrgInfoReply parent_org = 16;  // 上级组织信息
+}
+
+// 组织全名响应
+message OrgFullNameReply {
+  int32 org_id = 1;        // 组织ID
+  string full_name = 2;    // 组织全名
+} 

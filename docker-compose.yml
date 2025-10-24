@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库服务 (本项目专用)
+  postgres-process:
+    image: postgres:latest
+    container_name: postgres-process-management
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: processdb
+      TZ: Asia/Shanghai
+      POSTGRES_SHARED_BUFFERS: 128MB
+      POSTGRES_MAX_CONNECTIONS: 200
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 256MB
+      POSTGRES_WORK_MEM: 4MB
+    volumes:
+      - postgres_process_data:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+    networks:
+      - security-management_jxt-web
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d processdb"]
+      timeout: 20s
+      retries: 10
+      interval: 10s
+      start_period: 40s
+
+  # API 服务
+  process-management-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      DATABASE_URL: postgres://root:123456@postgres-process:5432/processdb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
+      ADMIN_DATABASE_URL: postgres://root:123456@postgres-process:5432/postgres?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
+      SERVER_PORT: :8003
+      GIN_MODE: release
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres-process:
+        condition: service_healthy
+    networks:
+      - security-management_jxt-web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # 工作流执行器服务
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: process-management-worker
+    environment:
+      DATABASE_URL: postgres://root:123456@postgres-process:5432/processdb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
+      ADMIN_DATABASE_URL: postgres://root:123456@postgres-process:5432/postgres?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
+      WORKER_DB_PATH: /data/workflows.db
+    volumes:
+      - worker_data:/data
+    depends_on:
+      postgres-process:
+        condition: service_healthy
+      process-management-api:
+        condition: service_healthy
+    networks:
+      - security-management_jxt-web
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+volumes:
+  postgres_process_data:
+  worker_data:
+
+networks:
+  security-management_jxt-web:
+    external: true
+

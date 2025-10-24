@@ -1,0 +1,13 @@
+FROM alpine:latest
+
+WORKDIR /app
+
+# 安装必要的库
+RUN apk --no-cache add ca-certificates
+
+# 复制预构建的二进制文件
+COPY worker .
+
+# 启动应用
+CMD ["./worker"]
+
