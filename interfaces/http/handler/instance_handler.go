@@ -12,18 +12,21 @@ import (
 
 // InstanceHandler 工作流实例HTTP处理器
 type InstanceHandler struct {
-	startHandler *command.StartWorkflowInstanceHandler
-	queryService *query.WorkflowInstanceQueryService
+	startHandler  *command.StartWorkflowInstanceHandler
+	deleteHandler *command.DeleteInstanceHandler
+	queryService  *query.WorkflowInstanceQueryService
 }
 
 // NewInstanceHandler 创建处理器
 func NewInstanceHandler(
 	startHandler *command.StartWorkflowInstanceHandler,
+	deleteHandler *command.DeleteInstanceHandler,
 	queryService *query.WorkflowInstanceQueryService,
 ) *InstanceHandler {
 	return &InstanceHandler{
-		startHandler: startHandler,
-		queryService: queryService,
+		startHandler:  startHandler,
+		deleteHandler: deleteHandler,
+		queryService:  queryService,
 	}
 }
 
@@ -131,47 +134,70 @@ func (h *InstanceHandler) ListInstances(c *gin.Context) {
 		"data": dtos,
 	})
 }
+
 // ListAllInstances 列出所有工作流实例（支持筛选）
 func (h *InstanceHandler) ListAllInstances(c *gin.Context) {
-        limit := 10
-        offset := 0
+	limit := 10
+	offset := 0
 
-        if l := c.Query("limit"); l != "" {
-                if v, err := strconv.Atoi(l); err == nil {
-                        limit = v
-                }
-        }
+	if l := c.Query("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil {
+			limit = v
+		}
+	}
 
-        if o := c.Query("offset"); o != "" {
-                if v, err := strconv.Atoi(o); err == nil {
-                        offset = v
-                }
-        }
+	if o := c.Query("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil {
+			offset = v
+		}
+	}
 
-        // 构建过滤条件
-        filters := make(map[string]interface{})
-        if workflowID := c.Query("workflow_id"); workflowID != "" {
-                filters["workflow_id"] = workflowID
-        }
-        if status := c.Query("status"); status != "" {
-                filters["status"] = status
-        }
+	// 构建过滤条件
+	filters := make(map[string]interface{})
+	if workflowID := c.Query("workflow_id"); workflowID != "" {
+		filters["workflow_id"] = workflowID
+	}
+	if status := c.Query("status"); status != "" {
+		filters["status"] = status
+	}
 
-        dtos, total, err := h.queryService.ListAllInstances(c.Request.Context(), filters, limit, offset)
-        if err != nil {
-                c.JSON(http.StatusOK, gin.H{
-                        "code": 500,
-                        "msg":  err.Error(),
-                })
-                return
-        }
+	dtos, total, err := h.queryService.ListAllInstances(c.Request.Context(), filters, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 500,
+			"msg":  err.Error(),
+		})
+		return
+	}
 
-        c.JSON(http.StatusOK, gin.H{
-                "code": 200,
-                "msg":  "success",
-                "data": gin.H{
-                        "items": dtos,
-                        "total": total,
-                },
-        })
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "success",
+		"data": gin.H{
+			"items": dtos,
+			"total": total,
+		},
+	})
+}
+
+// DeleteInstance 删除工作流实例
+func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
+	id := c.Param("id")
+
+	cmd := &command.DeleteInstanceCommand{
+		ID: id,
+	}
+
+	if err := h.deleteHandler.Handle(c.Request.Context(), cmd); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 500,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"msg":  "success",
+	})
 }

@@ -137,6 +137,7 @@ func setupTestEngine() *gin.Engine {
 	activateHandler := command.NewActivateWorkflowHandler(workflowRepo)
 	freezeHandler := command.NewFreezeWorkflowHandler(workflowRepo)
 	startInstanceHandler := command.NewStartWorkflowInstanceHandler(workflowRepo, instanceRepo, nil)
+	deleteInstanceHandler := command.NewDeleteInstanceHandler(instanceRepo)
 
 	// 初始化查询服务
 	workflowQueryService := query.NewWorkflowQueryService(workflowRepo)
@@ -154,6 +155,7 @@ func setupTestEngine() *gin.Engine {
 	)
 	instanceHandler := handler.NewInstanceHandler(
 		startInstanceHandler,
+		deleteInstanceHandler,
 		instanceQueryService,
 	)
 

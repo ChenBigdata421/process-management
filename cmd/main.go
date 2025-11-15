@@ -9,9 +9,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ChenBigdata421/jxt-core/sdk/pkg"
 	"github.com/gin-gonic/gin"
 	"github.com/jxt/process-management/application/command"
 	"github.com/jxt/process-management/application/query"
+	"github.com/jxt/process-management/cmd/migration"
+	_ "github.com/jxt/process-management/cmd/migration/version"
 	"github.com/jxt/process-management/config"
 	"github.com/jxt/process-management/domain/workflow"
 	"github.com/jxt/process-management/infrastructure/database"
@@ -50,19 +53,18 @@ func main() {
 	}
 	log.Println("Database connected successfully")
 
-	// 迁移数据库
-	if err := dbConn.Migrate(
-		&workflow.Workflow{},
-		&workflow.WorkflowInstance{},
-		&workflow.Task{},
-		&workflow.TaskHistory{},
-	); err != nil {
-		log.Fatalf("Failed to migrate database: %v", err)
+	db := dbConn.GetDB()
+
+	log.Println("数据库迁移开始")
+	if err := db.Debug().AutoMigrate(&workflow.Migration{}); err != nil {
+		log.Println(pkg.Red("数据库迁移失败: %v\n"), err)
 	}
-	log.Println("Database migrated successfully")
+
+	migration.Migrate.SetDb(db.Debug())
+	migration.Migrate.Migrate()
+	log.Println(`数据库基础数据初始化成功`)
 
 	// 初始化仓储
-	db := dbConn.GetDB()
 	workflowRepo := persistence.NewWorkflowRepository(db)
 	instanceRepo := persistence.NewWorkflowInstanceRepository(db)
 	taskRepo := persistence.NewTaskRepository(db)
@@ -89,6 +91,7 @@ func main() {
 	activateHandler := command.NewActivateWorkflowHandler(workflowRepo)
 	freezeHandler := command.NewFreezeWorkflowHandler(workflowRepo)
 	startInstanceHandler := command.NewStartWorkflowInstanceHandler(workflowRepo, instanceRepo, engineService)
+	deleteInstanceHandler := command.NewDeleteInstanceHandler(instanceRepo)
 	createTaskHandler := command.NewCreateTaskHandler(taskRepo)
 	claimTaskHandler := command.NewClaimTaskHandler(taskRepo, taskHistoryRepo)
 	completeTaskHandler := command.NewCompleteTaskHandler(taskRepo, taskHistoryRepo, engineService)
@@ -112,6 +115,7 @@ func main() {
 	)
 	instanceHandler := handler.NewInstanceHandler(
 		startInstanceHandler,
+		deleteInstanceHandler,
 		instanceQueryService,
 	)
 	taskHandler := handler.NewTaskHandler(

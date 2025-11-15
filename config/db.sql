@@ -1,0 +1,5 @@
+-- 开始初始化数据 ;
+
+INSERT INTO public.workflows VALUES ('b1ceb35a-6b33-4b7b-b9c4-9528ee512ecf', '文档删除申请流程', '申请删除文档，需要审批后执行', 'active', '{"steps": [{"id": "step_1763083175749", "name": "提交申请", "type": "user_task", "params": {"assignee": "${applicant}", "priority": "medium", "form_fields": ["document_id", "reason"]}, "retries": 0, "timeout": 300, "description": "填写删除申请表单"}, {"id": "step_1763083278157", "name": "经理审批", "type": "user_task", "params": {"priority": "high", "form_fields": ["approved", "comment"], "candidate_groups": ["manager"]}, "retries": 0, "timeout": 300, "description": ""}, {"id": "step_1763083705390", "name": "删除文件", "type": "process", "params": {}, "retries": 0, "timeout": 300, "description": ""}, {"id": "step_1763083737367", "name": "完成", "type": "complete", "params": {}, "retries": 0, "timeout": 300, "description": ""}]}', '2025-11-14 09:29:17.732276+08', '2025-11-15 16:26:02.465047+08', NULL);
+
+-- 数据完成 ;

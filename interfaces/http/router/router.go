@@ -32,6 +32,7 @@ func SetupRoutes(
 		instances.GET("", instanceHandler.ListAllInstances)
 		instances.POST("", instanceHandler.StartInstance)
 		instances.GET("/:id", instanceHandler.GetInstance)
+		instances.DELETE("/:id", instanceHandler.DeleteInstance)
 		instances.GET("/workflow/:workflow_id", instanceHandler.ListInstances)
 	}
 

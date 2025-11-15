@@ -15,7 +15,7 @@ services:
       POSTGRES_EFFECTIVE_CACHE_SIZE: 256MB
       POSTGRES_WORK_MEM: 4MB
     volumes:
-      - postgres_process_data:/var/lib/postgresql/data
+      - postgres_process_data:/var/lib/postgresql
     ports:
       - "5435:5432"
     networks:
@@ -37,8 +37,8 @@ services:
   # API 服务
   process-management-api:
     build:
-      context: .
-      dockerfile: Dockerfile.api
+      context: ..
+      dockerfile: process-management/Dockerfile.api
     environment:
       DATABASE_URL: postgres://root:123456@postgres-process:5432/processdb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
       ADMIN_DATABASE_URL: postgres://root:123456@postgres-process:5432/postgres?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
@@ -63,12 +63,15 @@ services:
           memory: 512M
         reservations:
           memory: 256M
+    configs:
+      - source: process-db-sql
+        target: /app/config/db.sql
 
   # 工作流执行器服务
   worker:
     build:
-      context: .
-      dockerfile: Dockerfile.worker
+      context: ..
+      dockerfile: process-management/Dockerfile.worker
     container_name: process-management-worker
     environment:
       DATABASE_URL: postgres://root:123456@postgres-process:5432/processdb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
@@ -99,3 +102,6 @@ networks:
   security-management_jxt-web:
     external: true
 
+configs:
+  process-db-sql:
+    file: config/db.sql
