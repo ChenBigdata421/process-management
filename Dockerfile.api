@@ -1,45 +1,67 @@
 # 构建阶段
-FROM golang:1.23-alpine AS builder
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/golang:1.23-alpine AS builder
 
-WORKDIR /build
+ENV GOPROXY="https://goproxy.cn/"
+ENV GO111MODULE="on"
+ENV GOTOOLCHAIN="go1.24.0"
 
-# 安装构建依赖
-RUN apk --no-cache add git
+# 安装必要的工具
+RUN apk add --no-cache git tzdata
 
-# 设置 Go 代理为国内镜像
-ENV GOPROXY=https://goproxy.cn,direct
-
-# 复制 jxt-core 依赖
-COPY jxt-core /jxt-core
-
-# 复制 go.mod 和 go.sum 并下载依赖
-COPY process-management/go.mod process-management/go.sum ./
-RUN go mod download
-
-# 复制源代码
-COPY process-management/ .
-
-# 编译应用
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags '-extldflags "-static"' -o api ./cmd/main.go
-
-# 运行阶段
-FROM alpine:latest
-
+# 设置工作目录
 WORKDIR /app
 
-# 安装 curl 用于健康检查
-RUN apk --no-cache add curl ca-certificates tzdata
+# 复制 go.mod 和 go.sum
+COPY process-management/go.mod ./go.mod
+COPY process-management/go.sum ./go.sum
 
-# 从构建阶段复制二进制文件
-COPY --from=builder /build/api .
+# 复制 jxt-core 本地依赖（用于 replace 指令）
+COPY jxt-core /jxt-core
 
-# 复制配置文件
-COPY --from=builder /build/config/db.sql ./config/db.sql
+# 清理和下载所有该模块所需的依赖
+RUN go mod tidy
+RUN go mod download all
+
+# 复制源码
+COPY process-management/ .
+
+# 编译可执行文件（入口在仓库根目录的 main.go）
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o process-management .
+
+# 运行阶段
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/alpine:3.22.2
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装运行依赖
+RUN apk add --no-cache tzdata ca-certificates curl && \
+    mkdir -p /var/log/process-management /app/config
+
+# 复制可执行文件与配置
+COPY --from=builder /app/process-management /app/
+COPY --from=builder /app/config/settings.yml /app/config/settings.yml
+COPY --from=builder /app/config/db.sql /app/config/db.sql
+COPY --from=builder /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+# 设置权限
+RUN chmod +x /app/process-management && \
+    chown -R nobody:nobody /app /var/log/process-management
+
+# 切换用户
+USER nobody
+
+# 环境变量
+ENV CONFIG_PATH=/app/config/settings.yml
 
 # 暴露端口
 EXPOSE 8003
 
-# 启动应用
-CMD ["./api"]
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8003/api/health || exit 1
+
+# 启动命令
+ENTRYPOINT ["/app/process-management", "server", "-c", "/app/config/settings.yml"]
 
 

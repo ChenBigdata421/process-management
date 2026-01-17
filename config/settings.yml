@@ -1,0 +1,298 @@
+application:
+  # dev开发环境 test测试环境 prod线上环境
+  mode: dev
+  # 服务名称
+  name: testApp
+  # 数据权限功能开关
+  enabledp: false
+
+logger:
+  # 日志存放路径
+  path: log
+  # 控制台日志，stdout: True 表示要输出到控制台
+  stdout: True
+  # 日志等级, debug, info, warn, error, fatal
+  level: debug
+  # 每个日志文件最大 50 MB
+  maxSize: 50  
+  # error日志文件保留天数
+  errorMaxage: 14  
+  # info日志文件保留天数
+  infoMaxage: 3  
+  # 日志文件保留数量
+  maxBackups: 10
+  # 数据库日志开关，命令微服务需要打开，查询微服务需要关闭
+  enableddb: false
+  # 数据库日志打印级别（4：Info，3 Warn，2 Error，1 Silent）
+  # 设置为 2 (Error) 只记录错误，避免 Outbox 轮询产生大量日志
+  gormLoggerLevel: 4
+
+# HTTP服务器配置 (Gin使用)  
+http:  
+  enabled: true            # 是否启用HTTP服务  
+  host: 0.0.0.0            # 服务器ip，默认使用 0.0.0.0  
+  port: 8003               # HTTP端口号  
+  readtimeout: 1           # 读取超时时间(秒)  
+  writetimeout: 2          # 写入超时时间(秒)  
+  idletimeout: 60          # 空闲连接超时时间(秒)  
+  maxheaderbytes: 1        # 最大请求头大小(MB)  
+  ssl:  
+    enabled: false           # 是否启用HTTPS  
+    keystr: "./cert.pem"     # 私钥内容（字符串形式）
+    pem: "./key.pem"         # 证书内容（PEM格式，字符串形式）
+    domain: "localhost:8000" # 证书域名（用于生成证书） 
+
+jwt:
+  # token 密钥，生产环境时及的修改
+  secret: jxt
+  # token 过期时间 单位：秒
+  timeout: 3600
+  # 过期前多长时间开始更换token 单位：秒
+  replaceTime: 30
+
+database:
+  masterDB: # 存放用户信息，角色信息，权限信息
+    driver: postgres # 数据库类型 mysql, sqlite3, postgres, sqlserver
+    source: postgres://root:123456@postgres-security:5432/securitydb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
+    connMaxIdleTime: 60    # 连接最大空闲时间(秒)
+    connMaxLifeTime: 3600  # 连接最大生存时间(秒)
+    maxIdleConns: 10       # 最大空闲连接数
+    maxOpenConns: 100      # 最大打开连接数
+  commandDB: # 存放evidence信息
+    driver: mysql
+    source: root:123456@tcp(mysql-evidence-command:3306)/evidence_command_db?charset=utf8&parseTime=True&loc=Local
+    connMaxIdleTime: 60    # 连接最大空闲时间(秒)
+    connMaxLifeTime: 3600  # 连接最大生存时间(秒)
+    maxIdleConns: 10       # 最大空闲连接数
+    maxOpenConns: 100      # 最大打开连接数
+  queryDB:  # 存放evidence查询信息
+    driver: postgres
+    source: postgres://root:123456@postgres-evidence-query:5432/evidencedb_query_db?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
+    connMaxIdleTime: 60    # 连接最大空闲时间(秒)
+    connMaxLifeTime: 3600  # 连接最大生存时间(秒)
+    maxIdleConns: 10       # 最大空闲连接数
+    maxOpenConns: 100      # 最大打开连接数
+  processDB:  # 存放evidence查询信息
+    driver: postgres
+    source: postgres://root:123456@postgres-process:5432/processdb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
+    connMaxIdleTime: 60    # 连接最大空闲时间(秒)
+    connMaxLifeTime: 3600  # 连接最大生存时间(秒)
+    maxIdleConns: 10       # 最大空闲连接数
+    maxOpenConns: 100      # 最大打开连接数
+  
+cache:
+#    redis:
+#      addr: 127.0.0.1:6379
+#      password: xxxxxx
+#      db: 2
+  # key存在即可
+  memory: ''
+
+queue:
+  memory:
+    poolSize: 100
+#    redis:
+#      addr: 127.0.0.1:6379
+#      password: xxxxxx
+#      producer:
+#        streamMaxLength: 100
+#        approximateMaxLength: true
+#      consumer:
+#        visibilityTimeout: 60
+#        bufferSize: 100
+#        concurrency: 10
+#        blockingTimeout: 5
+#        reclaimInterval: 1
+
+locker:
+  redis:
+
+# EventBus 配置 - Kafka (RedPanda)
+eventbus:
+  type: kafka
+  serviceName: "evidence-command-service"  # 服务名称（必需，ASCII only）
+
+  # Kafka 配置
+  kafka:
+    brokers:
+      - "redpanda:9092"  # Docker 环境使用服务名
+    
+    # Producer 配置
+    producer:
+      clientId: "evidence-command-producer"  # ASCII only
+      acks: "all"  # 等待所有副本确认
+      compression: "snappy"  # 压缩算法
+      maxMessageBytes: 1048576  # 1MB
+      timeout: 10s
+      retries: 3
+      idempotent: true  # 幂等性保证
+    
+    # Consumer 配置
+    consumer:
+      groupId: "evidence-command-consumer-group"  # ASCII only
+      clientId: "evidence-command-consumer"  # ASCII only
+      autoOffsetReset: "earliest"  # 从最早的消息开始消费
+      enableAutoCommit: false  # 手动提交 offset
+      sessionTimeout: 10s
+      heartbeatInterval: 3s
+    
+    # 安全配置
+    security:
+      enabled: false
+
+  # 指标配置
+  metrics:
+    enabled: true
+
+  # 链路追踪配置
+  tracing:
+    enabled: false
+    sampleRate: 0.1
+
+# 注意：Outbox 配置通过代码配置（在 command/internal/infrastructure/outbox/dependencies.go 中）
+# jxt-core 的 Outbox 组件设计为库组件，通过代码配置更灵活
+
+# ETCD配置 - 作为公共基础设施
+etcd:
+  enabled: true
+  hosts:
+    - "etcd:2379"                # Docker环境使用服务名
+    # - "etcd:2380"              # 生产环境可添加更多节点
+    # - "localhost:2379"         # 非Docker环境使用
+  username: ""
+  password: ""
+  namespace: "jxt/"              # 命名空间前缀，用于隔离不同环境
+  dialTimeout: 5                 # 连接超时(秒)
+  timeout: 3                     # 操作超时(秒)
+  tls:
+    enabled: false               # 开发环境可关闭TLS
+
+# ========================================
+# gRPC配置 - 使用SDK标准格式
+# ========================================
+grpc:
+  # gRPC客户端配置 - 调用其他微服务  
+  client:
+    enabled: true                                    # 临时禁用gRPC客户端
+    serviceKey: "security-management/services"         # 服务发现键名
+    timeout: 5000                                      # 超时时间(毫秒)
+    keepaliveTime: "30s"                              # Keepalive时间
+    useDiscovery: true                                # 使用服务发现
+    retries: 3                                        # 重试次数
+    nonBlock: false                                   # 非阻塞模式
+    maxRecvMsgSize: 4194304                          # 最大接收消息大小(4MB)
+    maxSendMsgSize: 4194304                          # 最大发送消息大小(4MB)
+    
+    # 中间件配置
+    middlewares:
+      trace: true                                     # 链路跟踪
+      duration: true                                  # 持续时间统计
+      prometheus: true                                # Prometheus监控
+      breaker: true                                   # 熔断器
+
+  # gRPC服务端配置 - 提供服务给其他微服务
+  server:
+    enabled: false                       # 是否开启gRPC服务端
+    listenOn: ":9000"                   # 监听地址和端口
+    serviceKey: "security-management/services"  # 服务注册键
+    timeout: 5000                       # 超时时间(毫秒)
+    # 认证配置
+    auth: false                         # 是否启用认证
+    # 性能控制
+    cpuThreshold: 900                   # CPU阈值
+    strictControl: false                # 严格控制模式
+    maxRecvMsgSize: 4194304            # 最大接收消息大小(4MB)
+    maxSendMsgSize: 4194304            # 最大发送消息大小(4MB)
+    # TLS配置
+    tls:
+      enabled: false                     # 是否启用TLS
+    # KeepAlive配置
+    keepAlive:
+      maxConnectionIdle: "15m"           # 最大空闲时间
+      maxConnectionAge: "30m"            # 最大连接时间
+      time: 5000                         # KeepAlive时间(毫秒)
+      timeout: 1000                      # KeepAlive超时(毫秒)
+    # 中间件配置
+    middlewares:
+      trace: true                        # 链路跟踪
+      prometheus: true                   # Prometheus监控
+      breaker: true                      # 熔断器
+
+# 多租户配置部分  
+tenants:  
+  # 是否启用多租户模式 - 关键开关  
+  # false: 使用上面的主数据库配置 (单租户模式)  
+  # true: 使用下面的租户配置 (多租户模式)  
+  enabled: false  
+  
+  # 租户识别配置  
+  resolver:  
+    type: "host"  # 可选: host, path, header, query  
+    headerName: "X-Tenant-ID"  # 当type为header时使用  
+    queryParam: "tenant"  # 当type为query时使用  
+    pathIndex: 0  # 当type为path时使用  
+  
+  # 默认租户配置 - 继承并可覆盖主数据库配置  
+  defaults:  
+    database:  
+      # 这里只需定义与主配置不同的值  
+      maxOpenConns: 5  # 覆盖主配置中的10   
+  
+  # 租户列表 - 仅在tenants.enabled=true时使用  
+  list:  
+    # 第一个租户 - 可视为主租户或默认租户  
+    - id: "tenant_primary"  
+      name: "Primary Organization"  
+      active: true  
+      hosts: ["app.example.com", "www.example.com"]  
+      database:  
+        # 只需指定与defaults不同的配置  
+        source: "user:password@tcp(db.example.com:3306)/primary_db"  
+    
+    # 第二个租户  
+    - id: "tenant_secondary"  
+      name: "Secondary Business Unit"  
+      active: true  
+      hosts: ["secondary.example.com"]  
+      database:  
+        source: "user:password@tcp(db.example.com:3306)/secondary_db"  
+        maxOpenConns: 15  # 覆盖默认租户配置  
+    
+    # 第三个租户 - 使用不同的数据库类型  
+    - id: "tenant_special"  
+      name: "Special Division"  
+      active: true  
+      hosts: ["special.example.com"]  
+      database:  
+        driver: "postgres"  # 不同的数据库类型  
+        source: "postgres://user:password@db.example.com:5432/special_db"  
+    
+    # 未激活的租户  
+    - id: "tenant_inactive"  
+      name: "Inactive Customer"  
+      active: false  # 禁用此租户  
+      hosts: ["inactive.example.com"]  
+      database:  
+        source: "user:password@tcp(db.example.com:3306)/inactive_db"
+
+# 外部服务集成配置  
+integrations:  
+  email:  
+    provider: "smtp"  
+    host: "smtp.example.com"  
+    port: 587  
+    username: "user@example.com"  
+    password: "email_password"  
+  
+  storage:  
+    provider: "s3"  
+    region: "us-west-2"  
+    bucket: "app-files"  
+    accessKey: "s3_access_key"  
+    secretKey: "s3_secret_key"  
+
+# 功能标志配置 - 可在运行时切换功能  
+features:  
+  newDashboard: true  
+  advancedAnalytics: false  
+  betaFeatures: false  
