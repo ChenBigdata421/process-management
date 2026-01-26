@@ -11,7 +11,7 @@ import (
 // Hub WebSocket连接管理中心
 type Hub struct {
 	// 用户ID -> 连接列表的映射
-	clients map[string]map[*Client]bool
+	clients map[int]map[*Client]bool
 
 	// 注册请求
 	register chan *Client
@@ -29,7 +29,7 @@ type Hub struct {
 // Message WebSocket消息
 type Message struct {
 	Type      string                 `json:"type"`      // 消息类型：task_created, task_updated, task_assigned, workflow_completed
-	UserID    string                 `json:"user_id"`   // 目标用户ID
+	UserID    int                    `json:"user_id"`   // 目标用户ID
 	Data      map[string]interface{} `json:"data"`      // 消息数据
 	Timestamp string                 `json:"timestamp"` // 时间戳
 }
@@ -37,7 +37,7 @@ type Message struct {
 // NewHub 创建新的Hub
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[string]map[*Client]bool),
+		clients:    make(map[int]map[*Client]bool),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		broadcast:  make(chan *Message, 256),
@@ -110,7 +110,7 @@ func (h *Hub) Run() {
 }
 
 // SendToUser 发送消息给指定用户
-func (h *Hub) SendToUser(userID string, msgType string, data map[string]interface{}) {
+func (h *Hub) SendToUser(userID int, msgType string, data map[string]interface{}) {
 	message := &Message{
 		Type:      msgType,
 		UserID:    userID,
@@ -127,18 +127,18 @@ func (h *Hub) SendToUser(userID string, msgType string, data map[string]interfac
 }
 
 // SendToUsers 发送消息给多个用户
-func (h *Hub) SendToUsers(userIDs []string, msgType string, data map[string]interface{}) {
+func (h *Hub) SendToUsers(userIDs []int, msgType string, data map[string]interface{}) {
 	for _, userID := range userIDs {
 		h.SendToUser(userID, msgType, data)
 	}
 }
 
 // GetOnlineUsers 获取在线用户列表
-func (h *Hub) GetOnlineUsers() []string {
+func (h *Hub) GetOnlineUsers() []int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	users := make([]string, 0, len(h.clients))
+	users := make([]int, 0, len(h.clients))
 	for userID := range h.clients {
 		users = append(users, userID)
 	}
@@ -146,7 +146,7 @@ func (h *Hub) GetOnlineUsers() []string {
 }
 
 // IsUserOnline 检查用户是否在线
-func (h *Hub) IsUserOnline(userID string) bool {
+func (h *Hub) IsUserOnline(userID int) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -155,7 +155,7 @@ func (h *Hub) IsUserOnline(userID string) bool {
 }
 
 // GetUserConnectionCount 获取用户的连接数
-func (h *Hub) GetUserConnectionCount(userID string) int {
+func (h *Hub) GetUserConnectionCount(userID int) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -181,7 +181,7 @@ func (h *Hub) Close() error {
 			close(client.send)
 		}
 	}
-	h.clients = make(map[string]map[*Client]bool)
+	h.clients = make(map[int]map[*Client]bool)
 
 	// 关闭 channel（停止 Run() 循环）
 	close(h.register)

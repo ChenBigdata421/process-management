@@ -1,189 +1,180 @@
 package api
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
-	"strconv"
+	"time"
 
 	"jxt-evidence-system/process-management/internal/application/command"
 	"jxt-evidence-system/process-management/internal/application/service/port"
+	"jxt-evidence-system/process-management/shared/common/global"
+	"jxt-evidence-system/process-management/shared/common/restapi"
 
+	jwtuser "github.com/ChenBigdata421/jxt-core/sdk/pkg/jwtauth/user"
+	"github.com/ChenBigdata421/jxt-core/sdk/pkg/logger"
 	"github.com/gin-gonic/gin"
 )
 
 // InstanceHandler 工作流实例HTTP处理器
 type InstanceHandler struct {
+	restapi.RestApi
 	instanceService port.InstanceService
+}
+
+// CancelInstance 取消工作流实例（将状态标记为取消）
+func (h *InstanceHandler) CancelInstance(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
+
+	var cmd command.CancelInstanceCommand
+	if err := c.ShouldBindUri(&cmd); err != nil {
+		logger.Error("绑定取消工作流实例命令的参数失败", "error", err)
+		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
+		return
+	}
+
+	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	if err := h.instanceService.CancelInstance(ctx, &cmd); err != nil {
+		logger.Error("取消工作流实例失败", "error", err)
+		h.Error(c, http.StatusInternalServerError, err, "取消工作流实例失败")
+		return
+	}
+
+	h.OK(c, nil, "取消工作流实例成功")
 }
 
 // StartInstance 启动工作流实例
 func (h *InstanceHandler) StartInstance(c *gin.Context) {
-	var req struct {
-		WorkflowID string          `json:"workflow_id" binding:"required"`
-		Input      json.RawMessage `json:"input"`
-	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 400,
-			"msg":  err.Error(),
-		})
+	cmd := command.StartWorkflowInstanceCommand{}
+	if err := c.ShouldBindJSON(&cmd); err != nil {
+		h.Error(c, http.StatusBadRequest, err, "")
 		return
 	}
-
-	// 将 JSON 对象转换为字符串，并移除多余的空格和换行符
-	inputStr := string(req.Input)
-	if inputStr == "" || inputStr == "null" {
-		inputStr = "{}"
-	} else {
-		// 解析 JSON 并重新编码，以移除多余的空格和换行符
-		var jsonData interface{}
-		if err := json.Unmarshal([]byte(inputStr), &jsonData); err == nil {
-			// 重新编码为紧凑的 JSON 字符串
-			if compactJSON, err := json.Marshal(jsonData); err == nil {
-				inputStr = string(compactJSON)
-			}
-		}
-	}
-
-	cmd := &command.StartWorkflowInstanceCommand{
-		WorkflowID: req.WorkflowID,
-		Input:      inputStr,
-	}
-
-	id, err := h.instanceService.StartWorkflowInstance(c.Request.Context(), cmd)
+	userID := jwtuser.GetUserId(c)
+	ctx = context.WithValue(ctx, global.UserIDKey, int(userID))
+	// 设置租户ID（单租户模式使用默认租户 "*"）
+	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	id, err := h.instanceService.StartWorkflowInstance(ctx, &cmd)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
-		})
+		h.Error(c, http.StatusInternalServerError, err, "启动工作流实例失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 200,
-		"msg":  "success",
-		"data": gin.H{"id": id},
-	})
+	h.OK(c, gin.H{"id": id}, "启动工作流实例成功")
 }
 
 // GetInstance 获取工作流实例
 func (h *InstanceHandler) GetInstance(c *gin.Context) {
-	id := c.Param("id")
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
 
-	dto, err := h.instanceService.GetInstanceByID(c.Request.Context(), id)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
-		})
+	var cmd command.GetInstanceCommand
+	if err := c.ShouldBindUri(&cmd); err != nil {
+		logger.Error("绑定获取工作流实例命令的参数失败", "error", err)
+		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
+	// 设置租户ID（单租户模式使用默认租户 "*"）
+	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	dto, err := h.instanceService.GetInstanceByID(ctx, cmd.ID)
+	if err != nil {
+		h.Error(c, http.StatusInternalServerError, err, "获取工作流实例失败")
+		return
+	}
+	h.OK(c, dto, "获取工作流实例成功")
+}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 200,
-		"msg":  "success",
-		"data": dto,
-	})
+func (h *InstanceHandler) GetInstanceDetail(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
+
+	var cmd command.GetInstanceCommand
+	if err := c.ShouldBindUri(&cmd); err != nil {
+		logger.Error("绑定获取工作流实例详情命令的参数失败", "error", err)
+		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
+		return
+	}
+	// 设置租户ID（单租户模式使用默认租户 "*"）
+	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	dto, err := h.instanceService.GetInstanceDetailByID(ctx, cmd.ID)
+	if err != nil {
+		h.Error(c, http.StatusInternalServerError, err, "获取工作流实例详情失败")
+		return
+	}
+	h.OK(c, dto, "获取工作流实例详情成功")
 }
 
 // ListInstances 列出工作流实例
-func (h *InstanceHandler) ListInstances(c *gin.Context) {
-	workflowID := c.Param("workflow_id")
-	limit := 10
-	offset := 0
+func (h *InstanceHandler) GetInstancesByWorkflow(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
 
-	if l := c.Query("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
-			limit = v
-		}
+	var query command.GetInstancesByWorkflowPagedQuery
+	if err := c.ShouldBindUri(&query); err != nil {
+		logger.Error("绑定获取工作流实例命令的参数失败", "error", err)
+		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
+		return
 	}
-
-	if o := c.Query("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil {
-			offset = v
-		}
-	}
-
-	dtos, err := h.instanceService.ListInstancesByWorkflowID(c.Request.Context(), workflowID, limit, offset)
+	// 设置租户ID（单租户模式使用默认租户 "*"）
+	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	instances, total, err := h.instanceService.GetInstancesByWorkflow(ctx, &query)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
-		})
+
+		h.Error(c, http.StatusInternalServerError, err, "查询工作流实例失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 200,
-		"msg":  "success",
-		"data": dtos,
-	})
+	h.PageOK(c, instances, int(total), query.GetPageIndex(), query.GetPageSize(), "查询成功")
 }
 
-// ListAllInstances 列出所有工作流实例（支持筛选）
-func (h *InstanceHandler) ListAllInstances(c *gin.Context) {
-	limit := 10
-	offset := 0
-
-	if l := c.Query("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
-			limit = v
-		}
-	}
-
-	if o := c.Query("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil {
-			offset = v
-		}
-	}
-
-	// 构建过滤条件
-	filters := make(map[string]interface{})
-	if workflowID := c.Query("workflow_id"); workflowID != "" {
-		filters["workflow_id"] = workflowID
-	}
-	if status := c.Query("status"); status != "" {
-		filters["status"] = status
-	}
-
-	dtos, total, err := h.instanceService.ListAllInstances(c.Request.Context(), filters, limit, offset)
+// GetPage 列出所有工作流实例（支持筛选）
+func (h *InstanceHandler) GetPage(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	var query command.InstancePagedQuery
+	err := c.ShouldBindQuery(&query)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
-		})
+		h.GetLogger(c).Error(err.Error())
+		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
+		return
+	}
+	// 设置租户ID（单租户模式使用默认租户 "*"）
+	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	instances, total, err := h.instanceService.GetPage(ctx, &query)
+	if err != nil {
+		h.Error(c, http.StatusInternalServerError, err, "查询工作流实例失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 200,
-		"msg":  "success",
-		"data": gin.H{
-			"items": dtos,
-			"total": total,
-		},
-	})
+	h.PageOK(c, instances, int(total), query.GetPageIndex(), query.GetPageSize(), "查询成功")
 }
 
 // DeleteInstance 删除工作流实例
 func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
-	id := c.Param("id")
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
 
-	cmd := &command.DeleteInstanceCommand{
-		ID: id,
+	var cmd command.DeleteInstanceCommand
+	if err := c.ShouldBindUri(&cmd); err != nil {
+		logger.Error("绑定删除工作流实例命令的参数失败", "error", err)
+		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
+		return
 	}
-
-	if err := h.instanceService.DeleteInstance(c.Request.Context(), cmd); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 500,
-			"msg":  err.Error(),
-		})
+	if cmd.GetId().IsEmpty() {
+		logger.Error("绑定删除工作流实例命令的参数失败,实例ID不能为空")
+		h.Error(c, http.StatusBadRequest, nil, "请求参数错误")
+		return
+	}
+	// 设置租户ID（单租户模式使用默认租户 "*"）
+	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	if err := h.instanceService.DeleteInstance(ctx, &cmd); err != nil {
+		logger.Error("删除工作流实例失败", "error", err)
+		h.Error(c, http.StatusInternalServerError, err, "删除工作流实例失败")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": 200,
-		"msg":  "success",
-	})
+	h.OK(c, nil, "删除工作流实例成功")
 }

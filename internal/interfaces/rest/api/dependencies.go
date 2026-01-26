@@ -59,10 +59,12 @@ func registerTaskApiDependencies() {
 func registerWorkflowApiDependencies() {
 	err := di.Provide(func(
 		workflowService port.WorkflowService,
+		instanceService port.InstanceService,
 		instanceRepo repository.WorkflowInstanceRepository,
 	) *WorkflowHandler {
 		return &WorkflowHandler{
 			workflowService: workflowService,
+			instanceService: instanceService,
 			instanceRepo:    instanceRepo,
 		}
 	})

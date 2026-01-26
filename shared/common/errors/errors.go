@@ -33,4 +33,13 @@ var (
 
 	// ErrTaskAlreadyCompleted 任务已完成
 	ErrTaskAlreadyCompleted = errors.New("task is already completed")
+
+	// ErrInvalidWorkflowID 无效的工作流ID格式
+	ErrInvalidWorkflowID = errors.New("invalid workflow ID format")
+
+	// ErrInvalidInstanceID 无效的实例ID格式
+	ErrInvalidInstanceID = errors.New("invalid instance ID format")
+
+	// ErrInvalidTaskID 无效的任务ID格式
+	ErrInvalidTaskID = errors.New("invalid task ID format")
 )

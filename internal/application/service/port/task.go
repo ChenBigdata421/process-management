@@ -4,13 +4,12 @@ import (
 	"context"
 
 	"jxt-evidence-system/process-management/internal/application/command"
+	task_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/task"
+	"jxt-evidence-system/process-management/internal/domain/valueobject"
 )
 
 // ClaimTaskHandler 认领任务处理器
 type TaskService interface {
-
-	// 处理认领任务命令
-	ClaimTask(ctx context.Context, cmd *command.ClaimTaskCommand) error
 
 	// Handle 处理完成任务命令
 	CompleteTask(ctx context.Context, cmd *command.CompleteTaskCommand) error
@@ -24,28 +23,26 @@ type TaskService interface {
 	CreateTask(ctx context.Context, cmd *command.CreateTaskCommand) (string, error)
 
 	// GetTaskByID 根据ID获取任务
-	GetTaskByID(ctx context.Context, id string) (*command.TaskDTO, error)
+	GetTaskByID(ctx context.Context, id valueobject.TaskID) (*task_aggregate.Task, error)
 
-	// ListTodoTasks 查询待办任务
-	ListTodoTasks(ctx context.Context, userID string, limit, offset int) ([]*command.TaskDTO, int64, error)
+	// GetRecentTask 根据实例ID获取最近的一条任务
+	GetRecentTask(ctx context.Context, instanceID valueobject.InstanceID) (*task_aggregate.Task, error)
 
-	// ListDoneTasks 查询已办任务
-	ListDoneTasks(ctx context.Context, userID string, limit, offset int) ([]*command.TaskDTO, int64, error)
+	// GetTodoTasks 查询待办任务
+	GetTodoTasks(ctx context.Context, userID int, query *command.TodoTaskPagedQuery) ([]*task_aggregate.Task, int, error)
 
-	// ListClaimableTasks 查询可认领的任务
-	ListClaimableTasks(ctx context.Context, userID string, userGroups []string, limit, offset int) ([]*command.TaskDTO, int64, error)
+	// GetDoneTasks 查询已办任务
+	GetDoneTasks(ctx context.Context, userID int, query *command.DoneTaskPagedQuery) ([]*task_aggregate.Task, int, error)
 
-	// ListTasksByInstanceID 查询实例的所有任务
-	ListTasksByInstanceID(ctx context.Context, instanceID string, limit, offset int) ([]*command.TaskDTO, error)
-
-	// ListAllTasks 查询所有任务（支持多条件查询）
-	ListAllTasks(ctx context.Context, filters map[string]interface{}, limit, offset int) ([]*command.TaskDTO, int64, error)
+	// GetPage 查询所有任务（支持筛选）
+	GetPage(ctx context.Context, query *command.TaskPagedQuery) ([]*task_aggregate.Task, int, error)
 
 	// GetTaskHistory 获取任务历史
-	GetTaskHistory(ctx context.Context, taskID string, limit, offset int) ([]*command.TaskHistoryDTO, error)
+	GetTaskHistory(ctx context.Context, taskID valueobject.TaskID) ([]*task_aggregate.TaskHistory, error)
 
 	// GetInstanceTaskHistory 获取实例的任务历史
-	GetInstanceTaskHistory(ctx context.Context, instanceID string, limit, offset int) ([]*command.TaskHistoryDTO, error)
+	GetInstanceTaskHistory(ctx context.Context, instanceID valueobject.InstanceID) ([]*task_aggregate.TaskHistory, error)
 	// GetInstanceTasks 获取实例的所有任务（包含当前状态）
-	GetInstanceTasks(ctx context.Context, instanceID string, limit, offset int) ([]*command.TaskDTO, int64, error)
+	GetTasksByInstanceID(ctx context.Context, instanceID valueobject.InstanceID) ([]*task_aggregate.Task, error)
+	CountTasksByInstanceID(ctx context.Context, instanceID valueobject.InstanceID) (int, error)
 }

@@ -73,14 +73,18 @@ func registerWorkflowServiceDependencies() {
 
 func registerInstanceServiceDependencies() {
 	err := di.Provide(func(
-		workflowRepo workflow_repository.WorkflowRepository,
+		workflowService port.WorkflowService,
 		instanceRepo instance_repository.WorkflowInstanceRepository,
 		engineService port.WorkflowEngineService,
+		taskService port.TaskService,
+		domainService *domain_service.WorkflowDomainService,
 	) port.InstanceService {
 		return &instanceService{
-			workflowRepo:  workflowRepo,
-			instanceRepo:  instanceRepo,
-			engineService: engineService,
+			workflowService: workflowService,
+			instanceRepo:    instanceRepo,
+			engineService:   engineService,
+			taskService:     taskService,
+			domainService:   *domainService,
 		}
 	})
 	if err != nil {

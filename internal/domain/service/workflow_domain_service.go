@@ -2,11 +2,14 @@ package domain_service
 
 import (
 	"encoding/json"
+	command "jxt-evidence-system/process-management/internal/application/command"
 	instance_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/instance"
 	task_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/task"
 	task_repository "jxt-evidence-system/process-management/internal/domain/aggregate/task/repository"
+	"jxt-evidence-system/process-management/internal/domain/valueobject"
 	"jxt-evidence-system/process-management/shared/common/status"
 	"log"
+	"strconv"
 	"strings"
 )
 
@@ -32,8 +35,8 @@ type StepDefinition struct {
 	Timeout       int                    `json:"timeout"`
 	Retries       int                    `json:"retries"`
 	Params        map[string]interface{} `json:"params"`
-	NextSteps     []string               `json:"next_steps"`     // 下一步步骤ID列表（支持并行）
-	ParallelTasks []StepDefinition       `json:"parallel_tasks"` // 并行任务列表
+	NextSteps     []string               `json:"nextSteps"`     // 下一步步骤ID列表（支持并行）
+	ParallelTasks []StepDefinition       `json:"parallelTasks"` // 并行任务列表
 }
 
 // WorkflowDefinitionStruct 工作流定义结构
@@ -43,21 +46,9 @@ type WorkflowDefinitionStruct struct {
 	Steps       []StepDefinition `json:"steps"`
 }
 
-// TaskHistoryItem 任务历史记录项
-type TaskHistoryItem struct {
-	TaskName    string                 `json:"task_name"`
-	TaskKey     string                 `json:"task_key"`
-	Assignee    string                 `json:"assignee"`
-	Status      string                 `json:"status"`
-	Result      string                 `json:"result"`
-	Comment     string                 `json:"comment"`
-	Output      map[string]interface{} `json:"output"`
-	CompletedAt string                 `json:"completed_at"`
-}
-
 // buildTaskHistories 构建任务历史列表
-func (s *WorkflowDomainService) BuildTaskHistories(tasks []*task_aggregate.Task) []TaskHistoryItem {
-	var taskHistories []TaskHistoryItem
+func (s *WorkflowDomainService) BuildTaskHistories(tasks []*task_aggregate.Task) []command.TaskHistoryItem {
+	var taskHistories []command.TaskHistoryItem
 
 	for _, t := range tasks {
 		if (t.Status == status.TaskStatusCompleted || t.Status == status.TaskStatusRejected) && t.CompletedAt != nil {
@@ -82,7 +73,7 @@ func (s *WorkflowDomainService) BuildTaskHistories(tasks []*task_aggregate.Task)
 				resultText = string(t.Result)
 			}
 
-			taskHistories = append(taskHistories, TaskHistoryItem{
+			taskHistories = append(taskHistories, command.TaskHistoryItem{
 				TaskName:    t.TaskName,
 				TaskKey:     t.TaskKey,
 				Assignee:    t.Assignee,
@@ -107,32 +98,86 @@ func (s *WorkflowDomainService) BuildTaskHistories(tasks []*task_aggregate.Task)
 	return taskHistories
 }
 
+// buildTaskHistories 构建实例任务列表，用于展示实例详情
+func (s *WorkflowDomainService) BuildInstanceDetail(tasks []*task_aggregate.Task) []command.TaskHistoryItem {
+	var taskHistories []command.TaskHistoryItem
+
+	for _, t := range tasks {
+		var output map[string]interface{}
+		if len(t.Output) > 0 {
+			if err := json.Unmarshal(t.Output, &output); err != nil {
+				output = make(map[string]interface{})
+			}
+		} else {
+			output = make(map[string]interface{})
+		}
+
+		resultText := ""
+		switch t.Result {
+		case status.TaskResultApproved:
+			resultText = "通过"
+		case status.TaskResultRejected:
+			resultText = "驳回"
+		case status.TaskResultCompleted:
+			resultText = "完成"
+		default:
+			resultText = string(t.Result)
+		}
+
+		if t.Status == status.TaskStatusPending {
+			resultText = "待处理"
+		}
+
+		completedAtStr := ""
+		if t.CompletedAt != nil {
+			completedAtStr = t.CompletedAt.Format("2006-01-02 15:04:05")
+		}
+		createdAtStr := t.CreatedAt.Format("2006-01-02 15:04:05")
+
+		taskHistories = append(taskHistories, command.TaskHistoryItem{
+			TaskName:    t.TaskName,
+			TaskKey:     t.TaskKey,
+			Assignee:    t.Assignee,
+			Status:      string(t.Status),
+			Result:      resultText,
+			Comment:     t.Comment,
+			Output:      output,
+			CompletedAt: completedAtStr,
+			CreatedAt:   createdAtStr,
+		})
+
+	}
+
+	// 按创建时间排序
+	for i := 0; i < len(taskHistories); i++ {
+		for j := 0; j < len(taskHistories)-i-1; j++ {
+			if taskHistories[j].CreatedAt > taskHistories[j+1].CreatedAt {
+				taskHistories[j], taskHistories[j+1] = taskHistories[j+1], taskHistories[j]
+			}
+		}
+	}
+
+	return taskHistories
+}
+
 // applyStepParamsToTask 从步骤参数设置任务属性
 func (s *WorkflowDomainService) ApplyStepParamsToTask(task *task_aggregate.Task, step *StepDefinition, instance *instance_aggregate.WorkflowInstance) {
 	if step.Params == nil {
 		return
 	}
-
+	task.TaskName = step.Name
+	task.TaskKey = step.ID
+	task.Description = step.Description
+	task.TaskType = step.Type
 	// 处理 assignee
 	if assignee, ok := step.Params["assignee"].(string); ok {
-		task.Assignee = s.resolveVariable(assignee, instance)
-	}
-
-	// 处理 candidate_users
-	if candidateUsers, ok := step.Params["candidate_users"].([]interface{}); ok {
-		for _, user := range candidateUsers {
-			if userStr, ok := user.(string); ok {
-				task.CandidateUsers = append(task.CandidateUsers, userStr)
-			}
-		}
-	}
-
-	// 处理 candidate_groups
-	if candidateGroups, ok := step.Params["candidate_groups"].([]interface{}); ok {
-		for _, group := range candidateGroups {
-			if groupStr, ok := group.(string); ok {
-				task.CandidateGroups = append(task.CandidateGroups, groupStr)
-			}
+		resolvedValue := s.resolveVariable(assignee, instance)
+		// 尝试将解析后的值转换为 int
+		if assigneeInt, err := strconv.Atoi(resolvedValue); err == nil {
+			task.Assignee = assigneeInt
+		} else {
+			log.Printf("[WorkflowDomainService] Failed to convert assignee to int: %s (error: %v)", resolvedValue, err)
+			return
 		}
 	}
 
@@ -149,7 +194,7 @@ func (s *WorkflowDomainService) ApplyStepParamsToTask(task *task_aggregate.Task,
 	}
 
 	// 处理表单字段
-	if formFields, ok := step.Params["form_fields"].([]interface{}); ok {
+	if formFields, ok := step.Params["formFields"].([]interface{}); ok {
 		fields := make([]string, 0, len(formFields))
 		for _, field := range formFields {
 			if fieldStr, ok := field.(string); ok {
@@ -158,7 +203,7 @@ func (s *WorkflowDomainService) ApplyStepParamsToTask(task *task_aggregate.Task,
 		}
 
 		formData := map[string]interface{}{
-			"form_fields": fields,
+			"formFields": fields,
 		}
 		formDataJSON, _ := json.Marshal(formData)
 		task.FormData = formDataJSON
@@ -166,7 +211,7 @@ func (s *WorkflowDomainService) ApplyStepParamsToTask(task *task_aggregate.Task,
 }
 
 // buildTaskData 构建任务数据（合并实例输入和历史记录）
-func (s *WorkflowDomainService) BuildTaskData(instance *instance_aggregate.WorkflowInstance, taskHistories []TaskHistoryItem, extraData map[string]interface{}) []byte {
+func (s *WorkflowDomainService) BuildTaskData(instance *instance_aggregate.WorkflowInstance, taskHistories []command.TaskHistoryItem, extraData map[string]interface{}) []byte {
 	taskData := make(map[string]interface{})
 
 	// 1. 加载实例输入数据
@@ -183,7 +228,7 @@ func (s *WorkflowDomainService) BuildTaskData(instance *instance_aggregate.Workf
 
 	// 3. 添加任务历史
 	if len(taskHistories) > 0 {
-		taskData["previous_tasks_history"] = taskHistories
+		taskData["previousTasksHistory"] = taskHistories
 		log.Printf("[EngineService] Added %d previous task histories to task data", len(taskHistories))
 	}
 
@@ -192,10 +237,10 @@ func (s *WorkflowDomainService) BuildTaskData(instance *instance_aggregate.Workf
 }
 
 // findPreviousCompletedTask 查找上一个已完成的任务
-func (s *WorkflowDomainService) FindPreviousCompletedTask(tasks []*task_aggregate.Task, currentTaskID string) *task_aggregate.Task {
+func (s *WorkflowDomainService) FindPreviousCompletedTask(tasks []*task_aggregate.Task, currentTaskID valueobject.TaskID) *task_aggregate.Task {
 	for i := len(tasks) - 1; i >= 0; i-- {
 		t := tasks[i]
-		if t.ID != currentTaskID && t.Status == status.TaskStatusCompleted && t.CompletedAt != nil {
+		if t.TaskID != currentTaskID && t.Status == status.TaskStatusCompleted && t.CompletedAt != nil {
 			return t
 		}
 	}

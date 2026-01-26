@@ -15,7 +15,6 @@ type TaskStatus string
 
 const (
 	TaskStatusPending   TaskStatus = "pending"   // 待处理
-	TaskStatusClaimed   TaskStatus = "claimed"   // 已认领
 	TaskStatusCompleted TaskStatus = "completed" // 已完成
 	TaskStatusRejected  TaskStatus = "rejected"  // 已驳回
 )

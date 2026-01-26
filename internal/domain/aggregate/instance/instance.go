@@ -4,39 +4,47 @@ import (
 	"encoding/json"
 	"time"
 
+	workflow_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/workflow"
+	"jxt-evidence-system/process-management/internal/domain/valueobject"
 	errors "jxt-evidence-system/process-management/shared/common/errors"
+	"jxt-evidence-system/process-management/shared/common/models"
 	"jxt-evidence-system/process-management/shared/common/status"
-
-	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // WorkflowInstance 工作流实例
 type WorkflowInstance struct {
-	ID           string                `gorm:"primaryKey" json:"id"`
-	WorkflowID   string                `json:"workflow_id"`
-	Status       status.InstanceStatus `json:"status"`
-	Input        json.RawMessage       `gorm:"type:jsonb" json:"input"`
-	Output       json.RawMessage       `gorm:"type:jsonb" json:"output"`
-	ErrorMessage string                `json:"error_message"`
-	StartedAt    time.Time             `json:"started_at"`
-	CompletedAt  *time.Time            `json:"completed_at"`
-	CreatedAt    time.Time             `json:"created_at"`
-	UpdatedAt    time.Time             `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt        `gorm:"index" json:"-"`
+	InstanceId   valueobject.InstanceID      `json:"instanceId" gorm:"primaryKey;column:id;type:uuid;comment:主键编码"`
+	WorkflowID   valueobject.WorkflowID      `json:"workflowId" gorm:"column:workflow_id;type:uuid;comment:工作流编码"`
+	InstanceNo   string                      `json:"instanceNo"`
+	WorkflowNo   string                      `json:"workflowNo" gorm:"-"`
+	WorkflowName string                      `json:"workflowName" gorm:"-"`
+	Status       status.InstanceStatus       `json:"status"`
+	Input        json.RawMessage             `gorm:"type:jsonb" json:"input"`
+	Output       json.RawMessage             `gorm:"type:jsonb" json:"output"`
+	ErrorMessage string                      `json:"errorMessage"`
+	StartedAt    time.Time                   `json:"startedAt"`
+	CompletedAt  *time.Time                  `json:"completedAt"`
+	Workflow     workflow_aggregate.Workflow `json:"-" gorm:"foreignKey:workflow_id;references:id"`
+
+	// 审计字段
+	models.ControlBy
+	models.ModelTime
 }
 
 // NewWorkflowInstance 创建新工作流实例
-func NewWorkflowInstance(workflowID, input string) *WorkflowInstance {
+func NewWorkflowInstance(workflowID valueobject.WorkflowID, input json.RawMessage) *WorkflowInstance {
 	now := time.Now()
 	return &WorkflowInstance{
-		ID:         uuid.New().String(),
+		InstanceId: valueobject.NewInstanceID(),
+		InstanceNo: "instance-" + now.Format("20060102150405"),
 		WorkflowID: workflowID,
 		Status:     status.InstanceStatusRunning,
-		Input:      json.RawMessage(input),
+		Input:      input,
 		StartedAt:  now,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ModelTime: models.ModelTime{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 }
 

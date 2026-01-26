@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	domain_websocket "jxt-evidence-system/process-management/internal/domain/aggregate/task/websocket"
 	infra_websocket "jxt-evidence-system/process-management/internal/infrastructure/websocket"
@@ -23,11 +24,20 @@ func NewWebSocketHandler(hub domain_websocket.WebSocketNotifier) *WebSocketHandl
 
 // HandleWebSocket 处理WebSocket连接
 func (h *WebSocketHandler) HandleWebSocket(c *gin.Context) {
-	userID := c.Query("user_id")
-	if userID == "" {
+	userIDStr := c.Query("user_id")
+	if userIDStr == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code": 400,
 			"msg":  "user_id is required",
+		})
+		return
+	}
+
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": 400,
+			"msg":  "invalid user_id",
 		})
 		return
 	}
@@ -50,11 +60,20 @@ func (h *WebSocketHandler) GetOnlineUsers(c *gin.Context) {
 
 // CheckUserOnline 检查用户是否在线
 func (h *WebSocketHandler) CheckUserOnline(c *gin.Context) {
-	userID := c.Param("user_id")
-	if userID == "" {
+	userIDStr := c.Param("user_id")
+	if userIDStr == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code": 400,
 			"msg":  "user_id is required",
+		})
+		return
+	}
+
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code": 400,
+			"msg":  "invalid user_id",
 		})
 		return
 	}
@@ -73,7 +92,7 @@ func (h *WebSocketHandler) CheckUserOnline(c *gin.Context) {
 // SendTestMessage 发送测试消息（用于调试）
 func (h *WebSocketHandler) SendTestMessage(c *gin.Context) {
 	var req struct {
-		UserID  string                 `json:"user_id"`
+		UserID  int                    `json:"user_id"`
 		Type    string                 `json:"type"`
 		Message map[string]interface{} `json:"message"`
 	}

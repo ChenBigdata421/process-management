@@ -3,35 +3,42 @@ package workflow_aggregate
 import (
 	"time"
 
+	"jxt-evidence-system/process-management/internal/domain/valueobject"
 	errors "jxt-evidence-system/process-management/shared/common/errors"
+	"jxt-evidence-system/process-management/shared/common/models"
 	"jxt-evidence-system/process-management/shared/common/status"
-
-	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // Workflow 工作流聚合根
 type Workflow struct {
-	ID          string                `gorm:"primaryKey" json:"id"`
-	Name        string                `json:"name"`
-	Description string                `json:"description"`
-	Status      status.WorkflowStatus `json:"status"`
-	Definition  string                `gorm:"type:jsonb" json:"definition"`
-	CreatedAt   time.Time             `json:"created_at"`
-	UpdatedAt   time.Time             `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt        `gorm:"index" json:"-"`
+	WorkflowID  valueobject.WorkflowID `json:"workflowId" gorm:"primaryKey;column:id;type:uuid;comment:主键编码"`
+	WorkflowNo  string                 `json:"workflowNo"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Status      status.WorkflowStatus  `json:"status"`
+	Definition  string                 `gorm:"type:jsonb" json:"definition"`
+	// 审计字段
+	models.ControlBy
+	models.ModelTime
 }
 
 // NewWorkflow 创建新工作流
-func NewWorkflow(name, description, definition string) *Workflow {
+func NewWorkflow(name, description, definition string, createBy int) *Workflow {
 	return &Workflow{
-		ID:          uuid.New().String(),
+		WorkflowID:  valueobject.NewWorkflowID(),
+		WorkflowNo:  "workflow-" + time.Now().Format("20060102150405"),
 		Name:        name,
 		Description: description,
 		Status:      status.StatusDraft,
 		Definition:  definition,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ControlBy: models.ControlBy{
+			CreateBy: createBy,
+			UpdateBy: createBy,
+		},
+		ModelTime: models.ModelTime{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 }
 

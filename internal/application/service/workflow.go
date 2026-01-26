@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"jxt-evidence-system/process-management/internal/application/command"
 	workflow_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/workflow"
 	workflow_repository "jxt-evidence-system/process-management/internal/domain/aggregate/workflow/repository"
+	"jxt-evidence-system/process-management/internal/domain/valueobject"
 	"jxt-evidence-system/process-management/shared/common/errors"
 	"jxt-evidence-system/process-management/shared/common/status"
 )
@@ -16,14 +18,11 @@ type workflowService struct {
 }
 
 func (h *workflowService) ActivateWorkflow(ctx context.Context, cmd *command.ActivateWorkflowCommand) error {
+
 	// 查找工作流
 	wf, err := h.repo.FindByID(ctx, cmd.ID)
 	if err != nil {
 		return err
-	}
-
-	if wf == nil {
-		return errors.ErrWorkflowNotFound
 	}
 
 	// 激活工作流
@@ -37,30 +36,27 @@ func (h *workflowService) ActivateWorkflow(ctx context.Context, cmd *command.Act
 
 func (h *workflowService) CreateWorkflow(ctx context.Context, cmd *command.CreateWorkflowCommand) (string, error) {
 	// 业务规则验证
-	if cmd.Name == "" {
+	if cmd.Name == "" || cmd.Definition == "" {
 		return "", errors.ErrInvalidWorkflowDefinition
 	}
 
 	// 创建工作流
-	wf := workflow_aggregate.NewWorkflow(cmd.Name, cmd.Description, cmd.Definition)
+	wf := workflow_aggregate.NewWorkflow(cmd.Name, cmd.Description, cmd.Definition, cmd.CreateBy)
 
 	// 保存到仓储
 	if err := h.repo.Save(ctx, wf); err != nil {
 		return "", err
 	}
 
-	return wf.ID, nil
+	return wf.WorkflowID.String(), nil
 }
 
 func (h *workflowService) DeleteWorkflow(ctx context.Context, cmd *command.DeleteWorkflowCommand) error {
+
 	// 查找工作流
 	wf, err := h.repo.FindByID(ctx, cmd.ID)
 	if err != nil {
 		return err
-	}
-
-	if wf == nil {
-		return errors.ErrWorkflowNotFound
 	}
 
 	// 业务规则验证：只能删除草稿或已取消的工作流
@@ -73,14 +69,11 @@ func (h *workflowService) DeleteWorkflow(ctx context.Context, cmd *command.Delet
 }
 
 func (h *workflowService) FreezeWorkflow(ctx context.Context, cmd *command.FreezeWorkflowCommand) error {
+
 	// 查找工作流
 	wf, err := h.repo.FindByID(ctx, cmd.ID)
 	if err != nil {
 		return err
-	}
-
-	if wf == nil {
-		return errors.ErrWorkflowNotFound
 	}
 
 	// 冻结工作流
@@ -93,8 +86,8 @@ func (h *workflowService) FreezeWorkflow(ctx context.Context, cmd *command.Freez
 }
 
 // GetWorkflowByID 根据ID获取工作流
-func (h *workflowService) GetWorkflowByID(ctx context.Context, id string) (*command.WorkflowDTO, error) {
-	wf, err := h.repo.FindByID(ctx, id)
+func (h *workflowService) GetWorkflowByID(ctx context.Context, workflowID valueobject.WorkflowID) (*workflow_aggregate.Workflow, error) {
+	wf, err := h.repo.FindByID(ctx, workflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -103,38 +96,30 @@ func (h *workflowService) GetWorkflowByID(ctx context.Context, id string) (*comm
 		return nil, errors.ErrWorkflowNotFound
 	}
 
-	return &command.WorkflowDTO{
-		ID:          wf.ID,
-		Name:        wf.Name,
-		Description: wf.Description,
-		Status:      string(wf.Status),
-		Definition:  wf.Definition,
-		CreatedAt:   wf.CreatedAt.String(),
-		UpdatedAt:   wf.UpdatedAt.String(),
-	}, nil
+	return wf, nil
 }
 
-// ListWorkflows 列出所有工作流
-func (h *workflowService) ListWorkflows(ctx context.Context, limit, offset int) ([]*command.WorkflowDTO, error) {
-	workflows, err := h.repo.FindAll(ctx, limit, offset)
+// GetWorkflowByID 根据ID获取工作流
+func (h *workflowService) GetWorkflowByName(ctx context.Context, name string) (*workflow_aggregate.Workflow, error) {
+	wf, err := h.repo.FindByName(ctx, name)
 	if err != nil {
 		return nil, err
 	}
 
-	dtos := make([]*command.WorkflowDTO, len(workflows))
-	for i, wf := range workflows {
-		dtos[i] = &command.WorkflowDTO{
-			ID:          wf.ID,
-			Name:        wf.Name,
-			Description: wf.Description,
-			Status:      string(wf.Status),
-			Definition:  wf.Definition,
-			CreatedAt:   wf.CreatedAt.String(),
-			UpdatedAt:   wf.UpdatedAt.String(),
-		}
+	if wf == nil {
+		return nil, errors.ErrWorkflowNotFound
 	}
 
-	return dtos, nil
+	return wf, nil
+}
+
+// GetPage 列出所有工作流（支持筛选）
+func (h *workflowService) GetPage(ctx context.Context, query *command.WorkflowPagedQuery) ([]*workflow_aggregate.Workflow, int, error) {
+	return h.repo.GetPage(ctx, query)
+}
+
+func (h *workflowService) GetAllWorkflow(ctx context.Context) ([]*workflow_aggregate.Workflow, error) {
+	return h.repo.GetAllWorkflow(ctx)
 }
 
 // CountWorkflows 统计工作流数量
@@ -144,16 +129,12 @@ func (h *workflowService) CountWorkflows(ctx context.Context) (int64, error) {
 
 // Handle 处理命令
 func (h *workflowService) UpdateWorkflow(ctx context.Context, cmd *command.UpdateWorkflowCommand) error {
+
 	// 查找工作流
 	wf, err := h.repo.FindByID(ctx, cmd.ID)
 	if err != nil {
 		return err
 	}
-
-	if wf == nil {
-		return errors.ErrWorkflowNotFound
-	}
-
 	// 业务规则验证：只能更新草稿或冻结状态的工作流
 	if wf.Status != status.StatusDraft && wf.Status != status.StatusFrozen {
 		return errors.ErrInvalidStatusTransition
@@ -163,6 +144,8 @@ func (h *workflowService) UpdateWorkflow(ctx context.Context, cmd *command.Updat
 	wf.Name = cmd.Name
 	wf.Description = cmd.Description
 	wf.Definition = cmd.Definition
+	wf.UpdateBy = cmd.UpdateBy
+	wf.UpdatedAt = time.Now()
 
 	// 保存更新
 	return h.repo.Update(ctx, wf)

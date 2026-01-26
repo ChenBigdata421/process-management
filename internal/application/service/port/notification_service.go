@@ -12,7 +12,7 @@ type NotificationService interface {
 	NotifyTaskCreated(ctx context.Context, task *task_aggregate.Task)
 
 	// NotifyTaskAssigned 通知任务已分配
-	NotifyTaskAssigned(ctx context.Context, task *task_aggregate.Task, assignee string)
+	NotifyTaskAssigned(ctx context.Context, task *task_aggregate.Task, assignee int)
 
 	// NotifyTaskCompleted 通知任务已完成
 	NotifyTaskCompleted(ctx context.Context, task *task_aggregate.Task)

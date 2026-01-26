@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"jxt-evidence-system/process-management/internal/application/command"
 	"jxt-evidence-system/process-management/internal/application/service/port"
 	instance_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/instance"
 	instance_repository "jxt-evidence-system/process-management/internal/domain/aggregate/instance/repository"
@@ -11,6 +13,9 @@ import (
 	task_repository "jxt-evidence-system/process-management/internal/domain/aggregate/task/repository"
 	workflow_repository "jxt-evidence-system/process-management/internal/domain/aggregate/workflow/repository"
 	domain_service "jxt-evidence-system/process-management/internal/domain/service"
+	"jxt-evidence-system/process-management/internal/domain/valueobject"
+	errors_ "jxt-evidence-system/process-management/shared/common/errors"
+	"jxt-evidence-system/process-management/shared/common/global"
 	"jxt-evidence-system/process-management/shared/common/status"
 	"log"
 	"strings"
@@ -54,30 +59,25 @@ type StepDefinition = domain_service.StepDefinition
 // WorkflowDefinitionStruct 工作流定义（从领域服务导入）
 type WorkflowDefinitionStruct = domain_service.WorkflowDefinitionStruct
 
-type TaskHistoryItem = domain_service.TaskHistoryItem
-
 // StartInstance 启动工作流实例并执行第一步
-func (s *WorkflowEngineService) StartInstance(ctx context.Context, instanceID string) error {
+func (s *WorkflowEngineService) StartInstance(ctx context.Context, instanceID valueobject.InstanceID) error {
 	log.Printf("[EngineService] Starting instance: %s", instanceID)
 
 	// 获取实例
 	instance, err := s.instanceRepo.FindByID(ctx, instanceID)
 	if err != nil {
+		if errors.Is(err, errors_.ErrInstanceNotFound) {
+			return fmt.Errorf("instance not found: %s", instanceID)
+		}
 		return fmt.Errorf("failed to find instance: %w", err)
 	}
-
-	if instance == nil {
-		return fmt.Errorf("instance not found: %s", instanceID)
-	}
-
 	// 获取工作流定义
 	wf, err := s.workflowRepo.FindByID(ctx, instance.WorkflowID)
 	if err != nil {
+		if errors.Is(err, errors_.ErrWorkflowNotFound) {
+			return fmt.Errorf("workflow not found: %s", instance.WorkflowID.String())
+		}
 		return fmt.Errorf("failed to find workflow: %w", err)
-	}
-
-	if wf == nil {
-		return fmt.Errorf("workflow not found: %s", instance.WorkflowID)
 	}
 
 	// 解析工作流定义
@@ -106,17 +106,17 @@ func (s *WorkflowEngineService) StartInstance(ctx context.Context, instanceID st
 
 // executeStep 执行工作流步骤
 func (s *WorkflowEngineService) executeStep(ctx context.Context, instance *instance_aggregate.WorkflowInstance, step *StepDefinition, definition *WorkflowDefinitionStruct) error {
-	log.Printf("[EngineService] Executing step: %s (type: %s) for instance: %s", step.Name, step.Type, instance.ID)
+	log.Printf("[EngineService] Executing step: %s (type: %s) for instance: %s", step.Name, step.Type, instance.InstanceId.String())
 
 	switch step.Type {
-	case "user_task":
+	case "userTask":
 		return s.executeUserTask(ctx, instance, step)
 	case "process":
 		return s.executeProcessTask(ctx, instance, step, definition)
 	case "parallel":
 		return s.executeParallelTasks(ctx, instance, step, definition)
 	case "complete":
-		return s.completeInstance(ctx, instance)
+		return s.completeInstance(ctx, instance, step, definition)
 	default:
 		log.Printf("[EngineService] Unknown step type: %s, skipping", step.Type)
 		// 未知类型，尝试执行下一步
@@ -129,17 +129,30 @@ func (s *WorkflowEngineService) executeUserTask(ctx context.Context, instance *i
 	log.Printf("[EngineService] Creating user task for step: %s", step.Name)
 
 	// 创建用户任务
-	task := task_aggregate.NewTask(instance.ID, instance.WorkflowID, step.Name, step.ID)
-	task.Description = step.Description
-
+	task := task_aggregate.NewTask(instance.InstanceId, instance.WorkflowID)
+	if userID, ok := ctx.Value(global.UserIDKey).(int); ok {
+		task.Assignee = userID
+	}
 	// 从步骤参数设置任务属性
 	s.domainService.ApplyStepParamsToTask(task, step, instance)
 
-	// 查找所有已处理的任务，构建任务历史
-	allTasks, err := s.taskRepo.FindByInstanceID(ctx, instance.ID, 100, 0)
-	var taskHistories []TaskHistoryItem
-	if err == nil && len(allTasks) > 0 {
-		taskHistories = s.domainService.BuildTaskHistories(allTasks)
+	tasks, err := s.taskRepo.FindByInstanceID(ctx, instance.InstanceId)
+	if err != nil {
+		return fmt.Errorf("failed to save task: %w", err)
+	}
+
+	var taskHistories []command.TaskHistoryItem
+
+	if len(tasks) > 0 {
+		taskHistories = s.domainService.BuildTaskHistories(tasks)
+	}
+
+	// 尝试从上下文中获取 next_task_approver（来自前一个任务的输出）
+	if nextApprover, ok := ctx.Value("next_task_approver").(int); ok {
+		if nextApprover != 0 {
+			task.Assignee = nextApprover
+			log.Printf("[EngineService] Set task assignee from next_task_approver: %d", nextApprover)
+		}
 	}
 
 	// 构建任务数据
@@ -150,7 +163,7 @@ func (s *WorkflowEngineService) executeUserTask(ctx context.Context, instance *i
 		return fmt.Errorf("failed to save task: %w", err)
 	}
 
-	log.Printf("[EngineService] User task created: %s (ID: %s)", task.TaskName, task.ID)
+	log.Printf("[EngineService] User task created: %s (ID: %s)", task.TaskName, task.TaskID.String())
 
 	// 发送任务创建通知
 	if s.notificationSvc != nil {
@@ -168,14 +181,34 @@ func (s *WorkflowEngineService) executeProcessTask(ctx context.Context, instance
 
 	// 自动化任务直接执行完成，继续下一步
 	// 这里可以根据需要添加实际的处理逻辑
+	// 创建用户任务
+	task := task_aggregate.NewTask(instance.InstanceId, instance.WorkflowID)
+
+	// 从步骤参数设置任务属性
+	s.domainService.ApplyStepParamsToTask(task, step, instance)
+	task.Status = status.TaskStatusCompleted
+	task.Result = status.TaskResultApproved
+	// 保存任务
+	if err := s.taskRepo.Save(ctx, task); err != nil {
+		return fmt.Errorf("failed to save task: %w", err)
+	}
 
 	return s.executeNextStep(ctx, instance, step, definition)
 }
 
 // completeInstance 完成工作流实例
-func (s *WorkflowEngineService) completeInstance(ctx context.Context, instance *instance_aggregate.WorkflowInstance) error {
-	log.Printf("[EngineService] Completing instance: %s", instance.ID)
+func (s *WorkflowEngineService) completeInstance(ctx context.Context, instance *instance_aggregate.WorkflowInstance, step *StepDefinition, definition *WorkflowDefinitionStruct) error {
+	log.Printf("[EngineService] Completing instance: %s", instance.InstanceId.String())
 
+	task := task_aggregate.NewTask(instance.InstanceId, instance.WorkflowID)
+	// 从步骤参数设置任务属性
+	s.domainService.ApplyStepParamsToTask(task, step, instance)
+	task.Status = status.TaskStatusCompleted
+	task.Result = status.TaskResultApproved
+	// 保存任务
+	if err := s.taskRepo.Save(ctx, task); err != nil {
+		return fmt.Errorf("failed to save task: %w", err)
+	}
 	now := time.Now()
 	instance.Status = status.InstanceStatusCompleted
 	instance.CompletedAt = &now
@@ -191,7 +224,7 @@ func (s *WorkflowEngineService) completeInstance(ctx context.Context, instance *
 
 // ContinueAfterTask 任务完成后继续执行流程
 func (s *WorkflowEngineService) ContinueAfterTask(ctx context.Context, task *task_aggregate.Task) error {
-	log.Printf("[EngineService] Continuing workflow after task completion: %s", task.ID)
+	log.Printf("[EngineService] Continuing workflow after task completion: %s", task.TaskID.String())
 
 	// 获取实例
 	instance, err := s.instanceRepo.FindByID(ctx, task.InstanceID)
@@ -200,7 +233,7 @@ func (s *WorkflowEngineService) ContinueAfterTask(ctx context.Context, task *tas
 	}
 
 	if instance == nil {
-		return fmt.Errorf("instance not found: %s", task.InstanceID)
+		return fmt.Errorf("instance not found: %s", task.InstanceID.String())
 	}
 
 	// 获取工作流定义
@@ -210,7 +243,7 @@ func (s *WorkflowEngineService) ContinueAfterTask(ctx context.Context, task *tas
 	}
 
 	if wf == nil {
-		return fmt.Errorf("workflow not found: %s", instance.WorkflowID)
+		return fmt.Errorf("workflow not found: %s", instance.WorkflowID.String())
 	}
 
 	// 解析工作流定义
@@ -234,7 +267,7 @@ func (s *WorkflowEngineService) ContinueAfterTask(ctx context.Context, task *tas
 
 	// 检查是否是并行任务的一部分
 	// 注意：只有当步骤类型是 "parallel" 时才需要检查并行任务
-	// 不能简单地根据 task_key 包含 "_" 来判断，因为步骤ID本身就可能包含 "_"
+	// 不能简单地根据 taskKey 包含 "_" 来判断，因为步骤ID本身就可能包含 "_"
 	if currentStep != nil && currentStep.Type == "parallel" {
 		// 检查该并行步骤的所有任务是否都已完成
 		allCompleted, err := s.checkParallelTasksCompleted(ctx, instance, currentStep.ID)
@@ -262,7 +295,7 @@ func (s *WorkflowEngineService) ContinueAfterTask(ctx context.Context, task *tas
 
 // RejectAndGoBack 驳回任务并回退到上一个步骤
 func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_aggregate.Task) error {
-	log.Printf("[EngineService] Rejecting task and going back: %s", task.ID)
+	log.Printf("[EngineService] Rejecting task and going back: %s", task.TaskID.String())
 
 	// 获取实例
 	instance, err := s.instanceRepo.FindByID(ctx, task.InstanceID)
@@ -270,7 +303,7 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 		return fmt.Errorf("failed to find instance: %w", err)
 	}
 	if instance == nil {
-		return fmt.Errorf("instance not found: %s", task.InstanceID)
+		return fmt.Errorf("instance not found: %s", task.InstanceID.String())
 	}
 
 	// 获取工作流定义
@@ -279,7 +312,7 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 		return fmt.Errorf("failed to find workflow: %w", err)
 	}
 	if wf == nil {
-		return fmt.Errorf("workflow not found: %s", instance.WorkflowID)
+		return fmt.Errorf("workflow not found: %s", instance.WorkflowID.String())
 	}
 
 	// 解析工作流定义
@@ -288,14 +321,17 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 		return fmt.Errorf("failed to parse workflow definition: %w", err)
 	}
 
-	// 从任务历史中查找上一个已完成的任务
-	allTasks, err := s.taskRepo.FindByInstanceID(ctx, instance.ID, 1000, 0)
+	tasks, err := s.taskRepo.FindByInstanceID(ctx, instance.InstanceId)
 	if err != nil {
-		return fmt.Errorf("failed to find tasks: %w", err)
+		return fmt.Errorf("查找实例的任务失败")
+	}
+
+	if len(tasks) == 0 {
+		return fmt.Errorf("没有发现实例: %s的任务", instance.InstanceId.String())
 	}
 
 	// 找出当前任务之前最后完成的任务
-	previousTask := s.domainService.FindPreviousCompletedTask(allTasks, task.ID)
+	previousTask := s.domainService.FindPreviousCompletedTask(tasks, task.TaskID)
 	if previousTask == nil {
 		return fmt.Errorf("cannot reject first task, no previous completed task found")
 	}
@@ -311,7 +347,7 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 	log.Printf("[EngineService] Found step definition: %s (%s)", previousStep.Name, previousStep.ID)
 
 	// 创建新任务回退到上一个步骤
-	newTask := task_aggregate.NewTask(instance.ID, instance.WorkflowID, previousStep.Name, previousStep.ID)
+	newTask := task_aggregate.NewTask(instance.InstanceId, instance.WorkflowID)
 	newTask.TaskType = previousStep.Type
 	newTask.Description = previousStep.Description
 
@@ -319,29 +355,21 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 
 	// 设置任务分配：优先使用上一个任务的处理人
 	previousTaskAssignee := previousTask.Assignee
-	if previousTask.Assignee != "" {
+	if previousTask.Assignee != 0 {
 		newTask.Assignee = previousTask.Assignee
 		log.Printf("[EngineService] Set assignee from previous task: %s", previousTask.Assignee)
 	}
 
-	// 构建驳回信息
-	rejectionInfo := map[string]interface{}{
-		"rejected_by":      task.Assignee,
-		"rejected_at":      task.CompletedAt.Format("2006-01-02 15:04:05"),
-		"rejection_reason": task.Comment,
-		"rejected_task_id": task.ID,
-	}
-
 	// 构建任务历史和任务数据
-	taskHistories := s.domainService.BuildTaskHistories(allTasks)
-	newTask.TaskData = s.domainService.BuildTaskData(instance, taskHistories, rejectionInfo)
+	taskHistories := s.domainService.BuildTaskHistories(tasks)
+	newTask.TaskData = s.domainService.BuildTaskData(instance, taskHistories, nil)
 
 	// 保存新任务
 	if err := s.taskRepo.Save(ctx, newTask); err != nil {
 		return fmt.Errorf("failed to save new task: %w", err)
 	}
 
-	log.Printf("[EngineService] Created new task for previous step: %s", newTask.ID)
+	log.Printf("[EngineService] Created new task for previous step: %s", newTask.TaskID.String())
 
 	// 发送通知（如果有通知服务）
 	if s.notificationSvc != nil {
@@ -360,7 +388,7 @@ func (s *WorkflowEngineService) executeNextStep(ctx context.Context, instance *i
 	if nextStep == nil {
 		// 没有下一步，完成流程
 		log.Printf("[EngineService] No next step found, completing instance")
-		return s.completeInstance(ctx, instance)
+		return s.completeInstance(ctx, instance, currentStep, definition)
 	}
 
 	log.Printf("[EngineService] Found next step: %s", nextStep.Name)
@@ -390,9 +418,16 @@ func (s *WorkflowEngineService) executeParallelTasks(ctx context.Context, instan
 		}
 
 		// 执行并行步骤（通常是 user_task）
-		if parallelStep.Type == "user_task" {
+		if parallelStep.Type == "userTask" {
 			if err := s.executeUserTask(ctx, instance, &parallelStep); err != nil {
 				log.Printf("[EngineService] Failed to create parallel task %s: %v", parallelStep.Name, err)
+				continue
+			}
+			createdTasks = append(createdTasks, parallelStep.ID)
+		}
+		if parallelStep.Type == "process" {
+			if err := s.executeProcessTask(ctx, instance, &parallelStep, definition); err != nil {
+				log.Printf("[EngineService] Failed to execute parallel task %s: %v", parallelStep.Name, err)
 				continue
 			}
 			createdTasks = append(createdTasks, parallelStep.ID)
@@ -408,16 +443,16 @@ func (s *WorkflowEngineService) executeParallelTasks(ctx context.Context, instan
 
 // checkParallelTasksCompleted 检查并行任务是否全部完成
 func (s *WorkflowEngineService) checkParallelTasksCompleted(ctx context.Context, instance *instance_aggregate.WorkflowInstance, stepID string) (bool, error) {
-	// 查找该实例的所有任务
-	tasks, err := s.taskRepo.FindByInstanceID(ctx, instance.ID, 100, 0)
+
+	tasks, err := s.taskRepo.FindByInstanceID(ctx, instance.InstanceId)
 	if err != nil {
-		return false, fmt.Errorf("failed to find tasks: %v", err)
+		return false, fmt.Errorf("查找实例的任务失败: %w", err)
 	}
 
 	// 查找属于该并行步骤的所有任务
 	var parallelTasks []*task_aggregate.Task
 	for _, task := range tasks {
-		// 检查任务的 task_key 是否以 stepID 开头（表示是该并行步骤的子任务）
+		// 检查任务的 taskKey 是否以 stepID 开头（表示是该并行步骤的子任务）
 		if strings.HasPrefix(task.TaskKey, stepID+"_") {
 			parallelTasks = append(parallelTasks, task)
 		}
@@ -431,7 +466,7 @@ func (s *WorkflowEngineService) checkParallelTasksCompleted(ctx context.Context,
 	// 注意：rejected 状态的任务也视为"已完成"，因为它已经被回退任务替代
 	for _, task := range parallelTasks {
 		if task.Status != status.TaskStatusCompleted && task.Status != status.TaskStatusRejected {
-			log.Printf("[EngineService] Parallel task %s not completed yet (status: %s)", task.ID, task.Status)
+			log.Printf("[EngineService] Parallel task %s not completed yet (status: %s)", task.TaskID.String(), task.Status)
 			return false, nil
 		}
 	}

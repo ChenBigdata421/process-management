@@ -31,14 +31,14 @@ type Client struct {
 	hub *Hub
 
 	// 用户ID
-	UserID string
+	UserID int
 
 	// 发送消息的通道
 	send chan []byte
 }
 
 // NewClient 创建新的客户端
-func NewClient(hub *Hub, conn *websocket.Conn, userID string) *Client {
+func NewClient(hub *Hub, conn *websocket.Conn, userID int) *Client {
 	return &Client{
 		hub:    hub,
 		conn:   conn,
@@ -133,7 +133,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // ServeWs 处理WebSocket请求
-func ServeWs(hub interface{}, w http.ResponseWriter, r *http.Request, userID string) {
+func ServeWs(hub interface{}, w http.ResponseWriter, r *http.Request, userID int) {
 	// 将接口转换为 *Hub
 	hubInstance, ok := hub.(*Hub)
 	if !ok {

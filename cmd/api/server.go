@@ -302,6 +302,17 @@ func initRouter() {
 
 	common.InitMiddleware(r)
 
+	// 注册健康检查端点（无需认证）
+	r.GET("/api/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"code": 0,
+			"msg":  "ok",
+			"data": gin.H{
+				"status": "healthy",
+			},
+		})
+	})
+
 }
 
 func performAPICheck() {

@@ -1,6 +1,7 @@
 package domain_service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	instance_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/instance"
@@ -212,9 +213,9 @@ func (e *ConditionEvaluator) resolveStepOutput(varPath string) (interface{}, err
 	stepKey := parts[0]
 	fieldName := parts[1]
 
-	// 查找该步骤对应的任务
-	// 注意：这里假设 task_key 就是 step_id
-	tasks, err := e.taskRepo.FindByInstanceID(nil, e.instance.ID, 100, 0)
+	ctx := context.Background()
+
+	tasks, err := e.taskRepo.FindByInstanceID(ctx, e.instance.InstanceId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find tasks: %v", err)
 	}

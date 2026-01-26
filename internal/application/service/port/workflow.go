@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"jxt-evidence-system/process-management/internal/application/command"
+	workflow_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/workflow"
+	"jxt-evidence-system/process-management/internal/domain/valueobject"
 )
 
 type WorkflowService interface {
@@ -14,8 +16,10 @@ type WorkflowService interface {
 	DeleteWorkflow(ctx context.Context, cmd *command.DeleteWorkflowCommand) error
 
 	FreezeWorkflow(ctx context.Context, cmd *command.FreezeWorkflowCommand) error
-	GetWorkflowByID(ctx context.Context, id string) (*command.WorkflowDTO, error)
-	ListWorkflows(ctx context.Context, limit, offset int) ([]*command.WorkflowDTO, error)
+	GetWorkflowByID(ctx context.Context, id valueobject.WorkflowID) (*workflow_aggregate.Workflow, error)
+	GetWorkflowByName(ctx context.Context, Name string) (*workflow_aggregate.Workflow, error)
+	GetPage(ctx context.Context, query *command.WorkflowPagedQuery) ([]*workflow_aggregate.Workflow, int, error)
+	GetAllWorkflow(ctx context.Context) ([]*workflow_aggregate.Workflow, error)
 	CountWorkflows(ctx context.Context) (int64, error)
 	UpdateWorkflow(ctx context.Context, cmd *command.UpdateWorkflowCommand) error
 }

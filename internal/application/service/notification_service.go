@@ -26,56 +26,44 @@ func (s *DefaultNotificationService) NotifyTaskCreated(ctx context.Context, task
 		return
 	}
 
-	log.Printf("[NotificationService] Notifying task created: %s", task.ID)
+	log.Printf("[NotificationService] Notifying task created: %s", task.TaskID.String())
 
 	data := map[string]interface{}{
-		"task_id":     task.ID,
-		"task_name":   task.TaskName,
-		"task_key":    task.TaskKey,
-		"instance_id": task.InstanceID,
-		"workflow_id": task.WorkflowID,
+		"taskId":      task.TaskID.String(),
+		"taskName":    task.TaskName,
+		"taskKey":     task.TaskKey,
+		"instanceId":  task.InstanceID.String(),
+		"workflowId":  task.WorkflowID.String(),
 		"assignee":    task.Assignee,
 		"priority":    task.Priority,
 		"status":      task.Status,
-		"created_at":  task.CreatedAt,
+		"createdAt":   task.CreatedAt,
 		"description": task.Description,
 	}
 
 	// 通知受让人
-	if task.Assignee != "" {
+	if task.Assignee != 0 {
 		s.wsNotifier.SendToUser(task.Assignee, "task_created", data)
 	}
 
-	// 通知候选用户
-	if len(task.CandidateUsers) > 0 {
-		s.wsNotifier.SendToUsers(task.CandidateUsers, "task_created", data)
-	}
-
-	// 通知候选组（这里简化处理，实际应该查询组成员）
-	if len(task.CandidateGroups) > 0 {
-		for _, group := range task.CandidateGroups {
-			log.Printf("[NotificationService] Task created for group: %s", group)
-			// TODO: 查询组成员并通知
-		}
-	}
 }
 
 // NotifyTaskAssigned 通知任务已分配
-func (s *DefaultNotificationService) NotifyTaskAssigned(ctx context.Context, task *task_aggregate.Task, assignee string) {
+func (s *DefaultNotificationService) NotifyTaskAssigned(ctx context.Context, task *task_aggregate.Task, assignee int) {
 	if s.wsNotifier == nil {
 		return
 	}
 
-	log.Printf("[NotificationService] Notifying task assigned: %s to %s", task.ID, assignee)
+	log.Printf("[NotificationService] Notifying task assigned: %s to %d", task.TaskID.String(), assignee)
 
 	data := map[string]interface{}{
-		"task_id":     task.ID,
-		"task_name":   task.TaskName,
-		"instance_id": task.InstanceID,
-		"workflow_id": task.WorkflowID,
-		"assignee":    assignee,
-		"priority":    task.Priority,
-		"status":      task.Status,
+		"taskId":     task.TaskID.String(),
+		"taskName":   task.TaskName,
+		"instanceId": task.InstanceID.String(),
+		"workflowId": task.WorkflowID.String(),
+		"assignee":   assignee,
+		"priority":   task.Priority,
+		"status":     task.Status,
 	}
 
 	s.wsNotifier.SendToUser(assignee, "task_assigned", data)
@@ -87,21 +75,21 @@ func (s *DefaultNotificationService) NotifyTaskCompleted(ctx context.Context, ta
 		return
 	}
 
-	log.Printf("[NotificationService] Notifying task completed: %s", task.ID)
+	log.Printf("[NotificationService] Notifying task completed: %s", task.TaskID.String())
 
 	data := map[string]interface{}{
-		"task_id":      task.ID,
-		"task_name":    task.TaskName,
-		"instance_id":  task.InstanceID,
-		"workflow_id":  task.WorkflowID,
-		"assignee":     task.Assignee,
-		"status":       task.Status,
-		"completed_at": task.CompletedAt,
-		"result":       task.Result,
+		"taskId":      task.TaskID.String(),
+		"taskName":    task.TaskName,
+		"instanceId":  task.InstanceID.String(),
+		"workflowId":  task.WorkflowID.String(),
+		"assignee":    task.Assignee,
+		"status":      task.Status,
+		"completedAt": task.CompletedAt,
+		"result":      task.Result,
 	}
 
 	// 通知任务创建者（如果有）
-	if task.Assignee != "" {
+	if task.Assignee != 0 {
 		s.wsNotifier.SendToUser(task.Assignee, "task_completed", data)
 	}
 
@@ -114,13 +102,13 @@ func (s *DefaultNotificationService) NotifyWorkflowCompleted(ctx context.Context
 		return
 	}
 
-	log.Printf("[NotificationService] Notifying workflow completed: %s", instance.ID)
+	log.Printf("[NotificationService] Notifying workflow completed: %s", instance.InstanceId.String())
 
 	_ = map[string]interface{}{
-		"instance_id":  instance.ID,
-		"workflow_id":  instance.WorkflowID,
-		"status":       instance.Status,
-		"completed_at": instance.CompletedAt,
+		"instanceId":  instance.InstanceId.String(),
+		"workflowId":  instance.WorkflowID.String(),
+		"status":      instance.Status,
+		"completedAt": instance.CompletedAt,
 	}
 
 	// TODO: 通知流程发起人和相关人员
@@ -138,7 +126,7 @@ func NewNoOpNotificationService() *NoOpNotificationService {
 
 func (s *NoOpNotificationService) NotifyTaskCreated(ctx context.Context, task *task_aggregate.Task) {}
 
-func (s *NoOpNotificationService) NotifyTaskAssigned(ctx context.Context, task *task_aggregate.Task, assignee string) {
+func (s *NoOpNotificationService) NotifyTaskAssigned(ctx context.Context, task *task_aggregate.Task, assignee int) {
 }
 
 func (s *NoOpNotificationService) NotifyTaskCompleted(ctx context.Context, task *task_aggregate.Task) {
