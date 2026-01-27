@@ -107,8 +107,9 @@ func registerWorkflowEngineServiceDependencies() {
 		instanceRepo instance_repository.WorkflowInstanceRepository,
 		taskRepo task_repository.TaskRepository,
 		domainService *domain_service.WorkflowDomainService,
+		notificationSvc port.NotificationService,
 	) port.WorkflowEngineService {
-		return NewWorkflowEngineService(workflowRepo, instanceRepo, taskRepo, *domainService)
+		return NewWorkflowEngineServiceWithNotification(workflowRepo, instanceRepo, taskRepo, *domainService, notificationSvc)
 	})
 	if err != nil {
 		logger.Fatalf("Failed to provide WorkflowEngineService: %v", err)

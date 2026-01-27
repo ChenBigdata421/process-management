@@ -163,6 +163,7 @@ func (s *WorkflowDomainService) BuildInstanceDetail(tasks []*task_aggregate.Task
 // applyStepParamsToTask 从步骤参数设置任务属性
 func (s *WorkflowDomainService) ApplyStepParamsToTask(task *task_aggregate.Task, step *StepDefinition, instance *instance_aggregate.WorkflowInstance) {
 	if step.Params == nil {
+		log.Printf("[WorkflowDomainService] Step params is nil for step: %s", step.Name)
 		return
 	}
 	task.TaskName = step.Name
@@ -171,14 +172,19 @@ func (s *WorkflowDomainService) ApplyStepParamsToTask(task *task_aggregate.Task,
 	task.TaskType = step.Type
 	// 处理 assignee
 	if assignee, ok := step.Params["assignee"].(string); ok {
+		log.Printf("[WorkflowDomainService] Found assignee param: %s", assignee)
 		resolvedValue := s.resolveVariable(assignee, instance)
+		log.Printf("[WorkflowDomainService] Resolved assignee value: %s", resolvedValue)
 		// 尝试将解析后的值转换为 int
 		if assigneeInt, err := strconv.Atoi(resolvedValue); err == nil {
 			task.Assignee = assigneeInt
+			log.Printf("[WorkflowDomainService] Set task assignee to: %d", assigneeInt)
 		} else {
 			log.Printf("[WorkflowDomainService] Failed to convert assignee to int: %s (error: %v)", resolvedValue, err)
 			return
 		}
+	} else {
+		log.Printf("[WorkflowDomainService] No assignee param found in step: %s, params: %v", step.Name, step.Params)
 	}
 
 	// 处理优先级

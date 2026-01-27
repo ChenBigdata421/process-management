@@ -4,6 +4,7 @@ import (
 	application "jxt-evidence-system/process-management/internal/application/service"
 	domain_service "jxt-evidence-system/process-management/internal/domain/service"
 	persistence "jxt-evidence-system/process-management/internal/infrastructure/persistence/gorm"
+	infra_ws "jxt-evidence-system/process-management/internal/infrastructure/websocket"
 	"jxt-evidence-system/process-management/internal/interfaces/rest/api"
 	"jxt-evidence-system/process-management/internal/interfaces/rest/router"
 )
@@ -15,6 +16,7 @@ func init() {
 	AppRouters = append(AppRouters, router.InitRouter)
 
 	// jiyuanjie 添加依赖注入
+	Registrations = append(Registrations, infra_ws.RegisterDependencies)
 	Registrations = append(Registrations, persistence.RegisterDependencies)
 	Registrations = append(Registrations, domain_service.RegisterDependencies)
 	Registrations = append(Registrations, application.RegisterDependencies)

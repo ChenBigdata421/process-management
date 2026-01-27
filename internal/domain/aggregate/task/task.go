@@ -114,17 +114,16 @@ func (t *Task) CanBeClaimed(userID int, userGroups []int) bool {
 
 // TaskHistory 任务历史记录
 type TaskHistory struct {
-	ID          valueobject.TaskHistoryID `json:"id" gorm:"column:id;type:uuid;comment:主键编码"`
-	TaskID      valueobject.TaskID        `json:"taskId" gorm:"column:task_id;type:uuid"`
-	InstanceID  valueobject.InstanceID    `json:"instanceId" gorm:"column:instance_id;type:uuid"`
-	TaskName    string                    `json:"taskName"`
-	Assignee    string                    `json:"assignee"`
-	Action      string                    `json:"action"` // claim, complete, approve, reject, delegate
-	Result      status.TaskResult         `json:"result"`
-	Comment     string                    `json:"comment"`
-	Output      json.RawMessage           `gorm:"type:jsonb" json:"output"`
-	CreatedAt   time.Time                 `json:"createdAt"`
-	CompletedAt time.Time                 `json:"completedAt"`
+	ID         valueobject.TaskHistoryID `json:"id" gorm:"column:id;type:uuid;comment:主键编码"`
+	TaskID     valueobject.TaskID        `json:"taskId" gorm:"column:task_id;type:uuid"`
+	InstanceID valueobject.InstanceID    `json:"instanceId" gorm:"column:instance_id;type:uuid"`
+	TaskName   string                    `json:"taskName"`
+	Assignee   string                    `json:"assignee"`
+	Action     string                    `json:"action"` // claim, complete, approve, reject, delegate
+	Result     status.TaskResult         `json:"result"`
+	Comment    string                    `json:"comment"`
+	Output     json.RawMessage           `gorm:"type:jsonb" json:"output"`
+	CreatedAt  time.Time                 `json:"createdAt"`
 }
 
 // TableName 指定表名

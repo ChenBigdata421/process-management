@@ -48,6 +48,23 @@ func NewWorkflowEngineService(
 	}
 }
 
+// NewWorkflowEngineServiceWithNotification 创建工作流引擎服务（带通知服务）
+func NewWorkflowEngineServiceWithNotification(
+	workflowRepo workflow_repository.WorkflowRepository,
+	instanceRepo instance_repository.WorkflowInstanceRepository,
+	taskRepo task_repository.TaskRepository,
+	domainService domain_service.WorkflowDomainService,
+	notificationSvc port.NotificationService,
+) *WorkflowEngineService {
+	return &WorkflowEngineService{
+		workflowRepo:    workflowRepo,
+		instanceRepo:    instanceRepo,
+		taskRepo:        taskRepo,
+		domainService:   domainService,
+		notificationSvc: notificationSvc,
+	}
+}
+
 // SetNotificationService 设置通知服务
 func (s *WorkflowEngineService) SetNotificationService(svc port.NotificationService) {
 	s.notificationSvc = svc

@@ -12,11 +12,50 @@ import (
 )
 
 func init() {
+	println("🔧 [DEBUG] dependencies.go init() 被调用")
+	routerNoCheckRole = append(routerNoCheckRole,
+		registerWebSocketRouterNoAuth,
+	)
+	println("🔧 [DEBUG] registerWebSocketRouterNoAuth 已添加到 routerNoCheckRole")
 	routerCheckRole = append(routerCheckRole,
 		registerWorkflowRouter,
 		registerInstanceRouter,
 		registerTaskRouter,
 	)
+	println("🔧 [DEBUG] dependencies.go init() 完成，routerNoCheckRole 数量:", len(routerNoCheckRole), "routerCheckRole 数量:", len(routerCheckRole))
+}
+
+// registerWebSocketRouterNoAuth 注册无需认证的 WebSocket 路由
+func registerWebSocketRouterNoAuth(v1 *gin.RouterGroup) {
+	log.Println("[Router] 🔧 Starting WebSocket route registration...")
+	log.Println("[Router] 🔧 v1 group path:", v1.BasePath())
+
+	// 通过依赖注入创建 WebSocket 处理器
+	err := di.Invoke(func(handler *api.WebSocketHandler) {
+		log.Println("[Router] 🔧 WebSocketHandler resolved, handler:", handler)
+		if handler != nil {
+			r := v1.Group("/ws")
+			log.Println("[Router] 🔧 WebSocket group created at:", r.BasePath())
+			{
+				// WebSocket 升级端点（无需认证）
+				r.GET("", handler.HandleWebSocket)
+				log.Println("[Router] 🔧 Registered GET /ws")
+				r.GET("/online-users", handler.GetOnlineUsers)
+				log.Println("[Router] 🔧 Registered GET /ws/online-users")
+				r.GET("/user/:user_id/online", handler.CheckUserOnline)
+				log.Println("[Router] 🔧 Registered GET /ws/user/:user_id/online")
+				r.POST("/test-message", handler.SendTestMessage)
+				log.Println("[Router] 🔧 Registered POST /ws/test-message")
+				log.Println("[Router] ✅ WebSocket routes registered successfully at /api/v1/ws")
+			}
+		} else {
+			logger.Fatal("WebSocketHandler is nil after resolution")
+		}
+	})
+
+	if err != nil {
+		logger.Fatalf("Failed to resolve WebSocketHandler: %v", err)
+	}
 }
 
 func registerWorkflowRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddleware) {
@@ -98,28 +137,5 @@ func registerTaskRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddlewar
 
 	if err != nil {
 		logger.Fatalf("Failed to resolve TaskHandler: %v", err)
-	}
-}
-
-func registerGinWebSocketRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddleware) {
-	// 通过依赖注入创建API处理器
-	err := di.Invoke(func(handler *api.WebSocketHandler) {
-		if handler != nil {
-			r := v1.Group("/instances").Use(authMiddleware.MiddlewareFunc()).Use(middleware.AuthCheckRole())
-			{
-				// 🆕 添加WebSocket路由
-				r.GET("/ws", handler.HandleWebSocket)
-				r.GET("/api/ws/online-users", handler.GetOnlineUsers)
-				r.GET("/api/ws/user/:user_id/online", handler.CheckUserOnline)
-				r.POST("/api/ws/test-message", handler.SendTestMessage)
-				log.Println("WebSocket routes registered")
-			}
-		} else {
-			logger.Fatal("InstanceHandler is nil after resolution")
-		}
-	})
-
-	if err != nil {
-		logger.Fatalf("Failed to resolve InstanceHandler: %v", err)
 	}
 }
