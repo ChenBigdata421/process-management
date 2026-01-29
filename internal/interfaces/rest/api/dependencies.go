@@ -1,6 +1,7 @@
 package api
 
 import (
+	"jxt-evidence-system/process-management/internal/application/service"
 	"jxt-evidence-system/process-management/internal/application/service/port"
 	"jxt-evidence-system/process-management/internal/domain/aggregate/instance/repository"
 	domain_websocket "jxt-evidence-system/process-management/internal/domain/aggregate/task/websocket"
@@ -31,7 +32,21 @@ func init() {
 		registerInstanceApiDependencies,
 		registerTaskApiDependencies,
 		registerWebSocketApiDependencies,
+		registerDownloadApprovalApiDependencies,
 	)
+}
+
+func registerDownloadApprovalApiDependencies() {
+	err := di.Provide(func(
+		downloadApprovalService *service.DownloadApprovalService,
+		instanceService port.InstanceService,
+		workflowService port.WorkflowService,
+	) *DownloadApprovalHandler {
+		return NewDownloadApprovalHandler(downloadApprovalService, instanceService, workflowService)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to provide DownloadApprovalHandler: %v", err)
+	}
 }
 
 func registerInstanceApiDependencies() {

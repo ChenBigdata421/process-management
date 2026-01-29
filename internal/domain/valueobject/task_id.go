@@ -74,7 +74,7 @@ func (id TaskID) Value() (driver.Value, error) {
 	if id.IsEmpty() {
 		return nil, nil
 	}
-	return id.value[:], nil // 返回16字节数组用于MySQL binary(16)存储
+	return id.String(), nil
 }
 
 // Scan 实现sql.Scanner接口，用于数据库扫描

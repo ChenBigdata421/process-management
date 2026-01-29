@@ -15,8 +15,8 @@ var _ = Describe("Instance API Tests", func() {
 	Describe("POST /api/v1/instances - 启动工作流实例", func() {
 		It("应该返回错误当工作流不存在", func() {
 			payload := map[string]interface{}{
-				"workflow_id": "nonexistent-workflow-id",
-				"input":       `{"key":"value"}`,
+				"workflowId": "nonexistent-workflow-id",
+				"input":      `{"key":"value"}`,
 			}
 
 			body, _ := json.Marshal(payload)

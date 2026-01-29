@@ -23,8 +23,9 @@ func (s *DeleteInstanceCommand) GetId() valueobject.InstanceID {
 
 // StartWorkflowInstanceCommand 启动工作流实例命令
 type StartWorkflowInstanceCommand struct {
-	ID    valueobject.WorkflowID `json:"id" binding:"required"`
-	Input json.RawMessage        `json:"input"`
+	ID           valueobject.WorkflowID `json:"id" binding:"required"`
+	WorkflowName string                 `json:"workflowName"`
+	Input        json.RawMessage        `json:"input"`
 }
 
 // InstancePagedQuery 工作流实例分页查询命令

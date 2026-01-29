@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"sync"
 
 	"jxt-evidence-system/process-management/internal/application/service/port"
+	download_approval_repository "jxt-evidence-system/process-management/internal/domain/aggregate/download_approval/repository"
+	instance_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/instance"
 	instance_repository "jxt-evidence-system/process-management/internal/domain/aggregate/instance/repository"
 	task_repository "jxt-evidence-system/process-management/internal/domain/aggregate/task/repository"
 	websocket "jxt-evidence-system/process-management/internal/domain/aggregate/task/websocket"
@@ -36,7 +39,19 @@ func init() {
 		registerInstanceServiceDependencies,
 		registerNotificationServiceDependencies,
 		registerWorkflowEngineServiceDependencies,
+		registerDownloadApprovalServiceDependencies,
 	)
+}
+
+func registerDownloadApprovalServiceDependencies() {
+	err := di.Provide(func(
+		approvalRepo download_approval_repository.MediaDownloadApprovalRepository,
+	) *DownloadApprovalService {
+		return NewDownloadApprovalService(approvalRepo)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to provide DownloadApprovalService: %v", err)
+	}
 }
 
 func registerTaskServiceDependencies() {
@@ -108,8 +123,17 @@ func registerWorkflowEngineServiceDependencies() {
 		taskRepo task_repository.TaskRepository,
 		domainService *domain_service.WorkflowDomainService,
 		notificationSvc port.NotificationService,
+		downloadApprovalSvc *DownloadApprovalService,
 	) port.WorkflowEngineService {
-		return NewWorkflowEngineServiceWithNotification(workflowRepo, instanceRepo, taskRepo, *domainService, notificationSvc)
+		engineSvc := NewWorkflowEngineServiceWithNotification(workflowRepo, instanceRepo, taskRepo, *domainService, notificationSvc)
+
+		// 设置工作流实例完成回调，用于更新下载审批状态
+		engineSvc.SetOnInstanceCompleted(func(ctx context.Context, instance *instance_aggregate.WorkflowInstance) error {
+			// 尝试更新下载审批状态为已通过
+			return downloadApprovalSvc.ApproveDownload(ctx, instance.InstanceId, 30) // 30天有效期
+		})
+
+		return engineSvc
 	})
 	if err != nil {
 		logger.Fatalf("Failed to provide WorkflowEngineService: %v", err)

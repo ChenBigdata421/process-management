@@ -88,30 +88,33 @@ func (h *instanceService) CountInstanceByWorkflow(ctx context.Context, workflowI
 	return h.instanceRepo.CountByWorkflowID(ctx, workflowID)
 }
 
-func (h *instanceService) StartWorkflowInstance(ctx context.Context, cmd *command.StartWorkflowInstanceCommand) (string, error) {
+func (h *instanceService) StartWorkflowInstance(ctx context.Context, cmd *command.StartWorkflowInstanceCommand) (valueobject.InstanceID, error) {
 	// 验证工作流存在且处于活跃状态
 	wf, err := h.workflowService.GetWorkflowByID(ctx, cmd.ID)
 	if err != nil {
-		return "", err
+		wf, err = h.workflowService.GetWorkflowByName(ctx, cmd.WorkflowName)
+		if err != nil {
+			return valueobject.InstanceID{}, err
+		}
 	}
 	if wf.Status != status.StatusActive {
-		return "", errors.ErrInvalidStatusTransition
+		return valueobject.InstanceID{}, errors.ErrInvalidStatusTransition
 	}
 
 	// 创建工作流实例
-	instance := instance_aggregate.NewWorkflowInstance(cmd.ID, cmd.Input)
+	instance := instance_aggregate.NewWorkflowInstance(wf.WorkflowID, cmd.Input)
 
 	// 保存实例
 	if err := h.instanceRepo.Save(ctx, instance); err != nil {
-		return "", err
+		return valueobject.InstanceID{}, err
 	}
 
 	// 🆕 启动工作流引擎，自动执行第一步
 	if h.engineService != nil {
 		if err := h.engineService.StartInstance(ctx, instance.InstanceId); err != nil {
-			return "", err
+			return valueobject.InstanceID{}, err
 		}
 	}
 
-	return instance.InstanceId.String(), nil
+	return instance.InstanceId, nil
 }

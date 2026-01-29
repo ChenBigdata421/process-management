@@ -59,7 +59,7 @@ func (id TaskHistoryID) Value() (driver.Value, error) {
 	if id.IsZero() {
 		return nil, nil
 	}
-	return id.value[:], nil // 返回UUID字符串格式，兼容PostgreSQL
+	return id.String(), nil
 }
 
 // Scan 实现 sql.Scanner 接口，用于从数据库读取

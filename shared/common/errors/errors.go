@@ -42,4 +42,19 @@ var (
 
 	// ErrInvalidTaskID 无效的任务ID格式
 	ErrInvalidTaskID = errors.New("invalid task ID format")
+
+	// ErrApprovalNotFound 审批记录不存在
+	ErrApprovalNotFound = errors.New("approval record not found")
+
+	// ErrApprovalPending 审批正在进行中
+	ErrApprovalPending = errors.New("approval is pending")
+
+	// ErrApprovalExpired 审批已过期
+	ErrApprovalExpired = errors.New("approval has expired")
+
+	// ErrApprovalRejected 审批已被驳回
+	ErrApprovalRejected = errors.New("approval has been rejected")
+
+	// ErrCannotDownload 无法下载
+	ErrCannotDownload = errors.New("cannot download, approval required")
 )

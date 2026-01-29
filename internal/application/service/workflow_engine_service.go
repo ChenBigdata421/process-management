@@ -22,14 +22,18 @@ import (
 	"time"
 )
 
+// InstanceCompletedCallback 工作流实例完成回调函数类型
+type InstanceCompletedCallback func(ctx context.Context, instance *instance_aggregate.WorkflowInstance) error
+
 // WorkflowEngineService 工作流引擎服务（应用层）
 // 负责工作流执行的应用协调，依赖领域服务和仓储
 type WorkflowEngineService struct {
-	workflowRepo    workflow_repository.WorkflowRepository
-	instanceRepo    instance_repository.WorkflowInstanceRepository
-	taskRepo        task_repository.TaskRepository
-	domainService   domain_service.WorkflowDomainService
-	notificationSvc port.NotificationService // 通知服务（可选）
+	workflowRepo        workflow_repository.WorkflowRepository
+	instanceRepo        instance_repository.WorkflowInstanceRepository
+	taskRepo            task_repository.TaskRepository
+	domainService       domain_service.WorkflowDomainService
+	notificationSvc     port.NotificationService  // 通知服务（可选）
+	onInstanceCompleted InstanceCompletedCallback // 实例完成回调（可选）
 }
 
 // NewWorkflowEngineService 创建工作流引擎服务
@@ -68,6 +72,11 @@ func NewWorkflowEngineServiceWithNotification(
 // SetNotificationService 设置通知服务
 func (s *WorkflowEngineService) SetNotificationService(svc port.NotificationService) {
 	s.notificationSvc = svc
+}
+
+// SetOnInstanceCompleted 设置实例完成回调
+func (s *WorkflowEngineService) SetOnInstanceCompleted(callback InstanceCompletedCallback) {
+	s.onInstanceCompleted = callback
 }
 
 // StepDefinition 步骤定义（从领域服务导入）
@@ -232,6 +241,13 @@ func (s *WorkflowEngineService) completeInstance(ctx context.Context, instance *
 
 	if err := s.instanceRepo.Update(ctx, instance); err != nil {
 		return fmt.Errorf("failed to update instance: %w", err)
+	}
+
+	// 触发工作流完成回调（用于更新下载审批等业务状态）
+	if s.onInstanceCompleted != nil {
+		if err := s.onInstanceCompleted(ctx, instance); err != nil {
+			log.Printf("[EngineService] Instance completed callback failed: %v", err)
+		}
 	}
 
 	log.Printf("[EngineService] Instance completed successfully")

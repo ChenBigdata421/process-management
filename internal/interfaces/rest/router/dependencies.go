@@ -21,6 +21,7 @@ func init() {
 		registerWorkflowRouter,
 		registerInstanceRouter,
 		registerTaskRouter,
+		registerDownloadApprovalRouter,
 	)
 	println("🔧 [DEBUG] dependencies.go init() 完成，routerNoCheckRole 数量:", len(routerNoCheckRole), "routerCheckRole 数量:", len(routerCheckRole))
 }
@@ -137,5 +138,29 @@ func registerTaskRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddlewar
 
 	if err != nil {
 		logger.Fatalf("Failed to resolve TaskHandler: %v", err)
+	}
+}
+
+func registerDownloadApprovalRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddleware) {
+	// 通过依赖注入创建API处理器
+	err := di.Invoke(func(handler *api.DownloadApprovalHandler) {
+		if handler != nil {
+			r := v1.Group("/mediadownload").Use(authMiddleware.MiddlewareFunc()).Use(middleware.AuthCheckRole())
+			{
+				// 查询下载审批状态
+				r.GET("/:mediaId/download-approval", handler.GetDownloadApprovalStatus)
+				// 提交下载审批申请
+				r.POST("/:mediaId/download-approval", handler.SubmitDownloadApproval)
+				// 记录下载（审批通过后调用）
+				r.POST("/:mediaId/download-record", handler.RecordDownload)
+				r.POST("/batch", handler.BatchGetDownloadApprovalStatus)
+			}
+		} else {
+			logger.Fatal("DownloadApprovalHandler is nil after resolution")
+		}
+	})
+
+	if err != nil {
+		logger.Fatalf("Failed to resolve DownloadApprovalHandler: %v", err)
 	}
 }

@@ -3,6 +3,7 @@ package persistence
 import (
 	"sync"
 
+	download_approval_repository "jxt-evidence-system/process-management/internal/domain/aggregate/download_approval/repository"
 	instance_repository "jxt-evidence-system/process-management/internal/domain/aggregate/instance/repository"
 	task_repository "jxt-evidence-system/process-management/internal/domain/aggregate/task/repository"
 	workflow_repository "jxt-evidence-system/process-management/internal/domain/aggregate/workflow/repository"
@@ -59,11 +60,20 @@ func registerTaskHistoryRepoDependencies() {
 	}
 }
 
+func registerDownloadApprovalRepoDependencies() {
+	if err := di.Provide(func() download_approval_repository.MediaDownloadApprovalRepository {
+		return &GormMediaDownloadApprovalRepository{}
+	}); err != nil {
+		logger.Fatalf("failed to provide MediaDownloadApprovalRepository: %v", err)
+	}
+}
+
 func init() {
 	registrations = append(registrations,
 		registerWorkflowInstanceRepoDependencies,
 		registerWorkflowRepoDependencies,
 		registerTaskRepoDependencies,
 		registerTaskHistoryRepoDependencies,
+		registerDownloadApprovalRepoDependencies,
 	)
 }

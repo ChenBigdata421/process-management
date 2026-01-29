@@ -15,7 +15,7 @@ var _ = Describe("Task API Tests", func() {
 	Describe("POST /api/v1/tasks - 创建任务", func() {
 		It("应该返回错误当必填字段缺失", func() {
 			payload := map[string]interface{}{
-				"task_name": "测试任务",
+				"taskName": "测试任务",
 			}
 
 			body, _ := json.Marshal(payload)

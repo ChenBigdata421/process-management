@@ -15,6 +15,6 @@ type InstanceService interface {
 	GetInstanceDetailByID(ctx context.Context, id valueobject.InstanceID) ([]command.TaskHistoryItem, error)
 	GetInstancesByWorkflow(ctx context.Context, query *command.GetInstancesByWorkflowPagedQuery) ([]*instance_aggregate.WorkflowInstance, int, error)
 	GetPage(ctx context.Context, query *command.InstancePagedQuery) ([]*instance_aggregate.WorkflowInstance, int, error)
-	StartWorkflowInstance(ctx context.Context, cmd *command.StartWorkflowInstanceCommand) (string, error)
+	StartWorkflowInstance(ctx context.Context, cmd *command.StartWorkflowInstanceCommand) (valueobject.InstanceID, error)
 	CountInstanceByWorkflow(ctx context.Context, workflowID valueobject.WorkflowID) (int64, error)
 }
