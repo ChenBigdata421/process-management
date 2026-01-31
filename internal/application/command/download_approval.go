@@ -1,6 +1,9 @@
 package command
 
-import "jxt-evidence-system/process-management/internal/domain/valueobject"
+import (
+	"jxt-evidence-system/process-management/internal/domain/valueobject"
+	"time"
+)
 
 // SubmitDownloadApprovalCommand 提交下载审批申请命令
 type SubmitDownloadApprovalCommand struct {
@@ -31,8 +34,8 @@ type DownloadApprovalStatusDTO struct {
 	ApprovalID    valueobject.DownloadApprovalID `json:"approvalId,omitempty"`
 	CanDownload   bool                           `json:"canDownload"`
 	Status        string                         `json:"status"` // none/pending/approved/rejected/expired
-	ApprovedAt    string                         `json:"approvedAt,omitempty"`
-	ExpiredAt     string                         `json:"expiredAt,omitempty"`
+	ApprovedAt    time.Time                      `json:"approvedAt,omitempty"`
+	ExpiredAt     time.Time                      `json:"expiredAt,omitempty"`
 	DownloadCount int                            `json:"downloadCount"`
 	RejectReason  string                         `json:"rejectReason,omitempty"`
 }

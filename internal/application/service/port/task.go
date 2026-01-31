@@ -17,10 +17,12 @@ type TaskService interface {
 	// Handle 处理删除任务命令
 	DeleteTask(ctx context.Context, cmd *command.DeleteTaskCommand) error
 
+	CancelTask(ctx context.Context, cmd *command.CancelTaskCommand) error
+
 	// 处理转办任务命令
 	DelegateTask(ctx context.Context, cmd *command.DelegateTaskCommand) error
 	// Handle 处理创建任务命令
-	CreateTask(ctx context.Context, cmd *command.CreateTaskCommand) (string, error)
+	CreateTask(ctx context.Context, cmd *command.CreateTaskCommand) (valueobject.TaskID, error)
 
 	// GetTaskByID 根据ID获取任务
 	GetTaskByID(ctx context.Context, id valueobject.TaskID) (*task_aggregate.Task, error)

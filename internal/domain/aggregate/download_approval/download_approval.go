@@ -16,6 +16,7 @@ const (
 	ApprovalStatusApproved ApprovalStatus = "approved" // 已通过
 	ApprovalStatusRejected ApprovalStatus = "rejected" // 已驳回
 	ApprovalStatusExpired  ApprovalStatus = "expired"  // 已过期
+	ApprovalStatusNone     ApprovalStatus = "none"
 )
 
 // MediaDownloadApproval 媒体下载审批记录
@@ -84,6 +85,20 @@ func (m *MediaDownloadApproval) Reject(reason string) {
 	now := time.Now()
 	m.Status = ApprovalStatusRejected
 	m.RejectReason = reason
+	m.UpdatedAt = now
+}
+
+// Pending 审批中
+func (m *MediaDownloadApproval) Pending() {
+	now := time.Now()
+	m.Status = ApprovalStatusPending
+	m.UpdatedAt = now
+}
+
+// 置空
+func (m *MediaDownloadApproval) None() {
+	now := time.Now()
+	m.Status = ApprovalStatusNone
 	m.UpdatedAt = now
 }
 

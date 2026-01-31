@@ -37,6 +37,7 @@ type StepDefinition struct {
 	Params        map[string]interface{} `json:"params"`
 	NextSteps     []string               `json:"nextSteps"`     // 下一步步骤ID列表（支持并行）
 	ParallelTasks []StepDefinition       `json:"parallelTasks"` // 并行任务列表
+	IsRoot        bool                   `json:"isRoot"`
 }
 
 // WorkflowDefinitionStruct 工作流定义结构
@@ -169,6 +170,7 @@ func (s *WorkflowDomainService) ApplyStepParamsToTask(task *task_aggregate.Task,
 	task.TaskName = step.Name
 	task.TaskKey = step.ID
 	task.Description = step.Description
+	task.IsFirstStep = step.IsRoot
 	task.TaskType = step.Type
 	// 处理 assignee
 	if assignee, ok := step.Params["assignee"].(string); ok {
@@ -242,15 +244,284 @@ func (s *WorkflowDomainService) BuildTaskData(instance *instance_aggregate.Workf
 	return taskDataJSON
 }
 
-// findPreviousCompletedTask 查找上一个已完成的任务
-func (s *WorkflowDomainService) FindPreviousCompletedTask(tasks []*task_aggregate.Task, currentTaskID valueobject.TaskID) *task_aggregate.Task {
-	for i := len(tasks) - 1; i >= 0; i-- {
-		t := tasks[i]
-		if t.TaskID != currentTaskID && t.Status == status.TaskStatusCompleted && t.CompletedAt != nil {
+// PreviousTaskInfo 上一个任务的信息
+type PreviousTaskInfo struct {
+	IsParallelGroup bool                   // 是否为并行任务组
+	ParallelTasks   []*task_aggregate.Task // 并行任务组的所有任务（如果是并行组）
+	SingleTask      *task_aggregate.Task   // 单个任务（如果不是并行组）
+	StepID          string                 // 步骤ID
+}
+
+// extractParallelGroupPrefix 从 taskKey 中提取并行组前缀
+// 如果 taskKey 是并行任务（格式：parentID_index），返回 parentID
+// 否则返回空字符串
+func (s *WorkflowDomainService) extractParallelGroupPrefix(taskKey string) string {
+	if taskKey == "" {
+		return ""
+	}
+
+	idx := strings.LastIndex(taskKey, "_")
+	if idx <= 0 {
+		return ""
+	}
+
+	potentialSuffix := taskKey[idx+1:]
+	if _, err := strconv.Atoi(potentialSuffix); err != nil {
+		return ""
+	}
+
+	return taskKey[:idx]
+}
+
+// findCurrentTask 在任务列表中查找指定ID的任务
+func (s *WorkflowDomainService) findCurrentTask(tasks []*task_aggregate.Task, taskID valueobject.TaskID) *task_aggregate.Task {
+	for _, t := range tasks {
+		if t.TaskID == taskID {
 			return t
 		}
 	}
 	return nil
+}
+
+// findPreviousCompletedTaskInList 从后向前查找上一个已完成的任务
+// 支持跳过并行任务组中的兄弟任务
+func (s *WorkflowDomainService) findPreviousCompletedTaskInList(tasks []*task_aggregate.Task, currentTask *task_aggregate.Task, parallelGroupPrefix string) *task_aggregate.Task {
+	for i := len(tasks) - 1; i >= 0; i-- {
+		t := tasks[i]
+
+		// 跳过当前任务
+		if t.TaskID == currentTask.TaskID {
+			continue
+		}
+
+		// 如果当前任务是并行任务，跳过同一并行组内的其他任务
+		if parallelGroupPrefix != "" && strings.HasPrefix(t.TaskKey, parallelGroupPrefix+"_") {
+			log.Printf("[WorkflowDomainService] Skipping parallel sibling task: %s", t.TaskKey)
+			continue
+		}
+
+		// 找到已完成的任务,注意去除同步骤的任务
+		if t.Status == status.TaskStatusCompleted && t.CompletedAt != nil && t.TaskKey != currentTask.TaskKey {
+			log.Printf("[WorkflowDomainService] Found previous completed task: %s (TaskKey: %s)", t.TaskName, t.TaskKey)
+			return t
+		}
+	}
+
+	log.Printf("[WorkflowDomainService] No previous completed task found")
+	return nil
+}
+
+// collectParallelGroupTasks 收集并行任务组的所有已完成任务
+// 注意：当存在相同 TaskKey 的多个任务时，只保留最新的任务（按 CreatedAt 时间排序）
+func (s *WorkflowDomainService) collectParallelGroupTasks(tasks []*task_aggregate.Task, parallelGroupPrefix string) []*task_aggregate.Task {
+	// 使用 map 来存储每个 TaskKey 对应的最新任务
+	taskKeyMap := make(map[string]*task_aggregate.Task)
+
+	for _, t := range tasks {
+		if strings.HasPrefix(t.TaskKey, parallelGroupPrefix+"_") && t.Status == status.TaskStatusCompleted {
+			// 如果该 TaskKey 已存在，比较时间，保留最新的
+			if existing, exists := taskKeyMap[t.TaskKey]; exists {
+				// 比较创建时间，保留较新的任务
+				if t.CreatedAt.After(existing.CreatedAt) {
+					log.Printf("[WorkflowDomainService] Replacing older task %s (created: %v) with newer task (created: %v)",
+						t.TaskKey, existing.CreatedAt, t.CreatedAt)
+					taskKeyMap[t.TaskKey] = t
+				}
+			} else {
+				taskKeyMap[t.TaskKey] = t
+			}
+		}
+	}
+
+	// 将 map 转换为切片
+	var parallelTasks []*task_aggregate.Task
+	for _, t := range taskKeyMap {
+		parallelTasks = append(parallelTasks, t)
+	}
+
+	return parallelTasks
+}
+
+// FindPreviousTaskInfo 查找上一个步骤的完整信息
+// 支持并行任务场景：如果上一步是并行任务组，返回该组的所有任务
+func (s *WorkflowDomainService) FindPreviousTaskInfo(tasks []*task_aggregate.Task, currentTaskID valueobject.TaskID) *PreviousTaskInfo {
+	// 1. 查找当前任务
+	currentTask := s.findCurrentTask(tasks, currentTaskID)
+	if currentTask == nil {
+		log.Printf("[WorkflowDomainService] Current task not found: %s", currentTaskID.String())
+		return nil
+	}
+
+	// 2. 识别当前任务是否为并行任务
+	currentParallelGroupPrefix := s.extractParallelGroupPrefix(currentTask.TaskKey)
+	if currentParallelGroupPrefix != "" {
+		log.Printf("[WorkflowDomainService] Current task is parallel task, group prefix: %s", currentParallelGroupPrefix)
+	}
+
+	// 3. 查找上一个已完成的任务
+	previousCompletedTask := s.findPreviousCompletedTaskInList(tasks, currentTask, currentParallelGroupPrefix)
+	if previousCompletedTask == nil {
+		return nil
+	}
+
+	log.Printf("[WorkflowDomainService] Found previous completed task: %s (TaskKey: %s)", previousCompletedTask.TaskName, previousCompletedTask.TaskKey)
+
+	// 4. 识别上一个任务是否为并行任务组的一部分
+	previousParallelGroupPrefix := s.extractParallelGroupPrefix(previousCompletedTask.TaskKey)
+	if previousParallelGroupPrefix == "" {
+		// 上一个任务不是并行任务，返回单个任务
+		return &PreviousTaskInfo{
+			IsParallelGroup: false,
+			SingleTask:      previousCompletedTask,
+			StepID:          previousCompletedTask.TaskKey,
+		}
+	}
+
+	// 5. 收集并行任务组的所有任务
+	log.Printf("[WorkflowDomainService] Previous task is part of parallel group: %s", previousParallelGroupPrefix)
+	parallelTasks := s.collectParallelGroupTasks(tasks, previousParallelGroupPrefix)
+
+	if len(parallelTasks) > 0 {
+		log.Printf("[WorkflowDomainService] Found %d parallel tasks in group %s", len(parallelTasks), previousParallelGroupPrefix)
+		return &PreviousTaskInfo{
+			IsParallelGroup: true,
+			ParallelTasks:   parallelTasks,
+			StepID:          previousParallelGroupPrefix,
+		}
+	}
+
+	// 如果没有找到并行任务组，返回单个任务
+	return &PreviousTaskInfo{
+		IsParallelGroup: false,
+		SingleTask:      previousCompletedTask,
+		StepID:          previousCompletedTask.TaskKey,
+	}
+}
+
+// findPreviousCompletedTask 查找上一个已完成的任务（保留向后兼容）
+// 支持并行任务场景：如果当前任务是并行任务，会跳过同一并行组内的其他任务
+// 注意：此方法只返回单个任务，无法处理并行任务组场景，建议使用 FindPreviousStepInfo
+func (s *WorkflowDomainService) FindPreviousCompletedTask(tasks []*task_aggregate.Task, currentTaskID valueobject.TaskID) *task_aggregate.Task {
+	// 找到当前任务
+	var currentTask *task_aggregate.Task
+	for _, t := range tasks {
+		if t.TaskID == currentTaskID {
+			currentTask = t
+			break
+		}
+	}
+
+	if currentTask == nil {
+		log.Printf("[WorkflowDomainService] Current task not found: %s", currentTaskID.String())
+		return nil
+	}
+
+	// 检查当前任务是否是并行任务（taskKey 包含下划线表示是并行任务的子任务）
+	// 例如：parallel_approval_1, parallel_approval_2
+	var parallelGroupPrefix string
+	if idx := strings.LastIndex(currentTask.TaskKey, "_"); idx > 0 {
+		// 尝试提取并行组前缀
+		// 如果最后一个下划线后面是数字，则认为是并行任务
+		potentialSuffix := currentTask.TaskKey[idx+1:]
+		if _, err := strconv.Atoi(potentialSuffix); err == nil {
+			parallelGroupPrefix = currentTask.TaskKey[:idx]
+			log.Printf("[WorkflowDomainService] Detected parallel task, group prefix: %s", parallelGroupPrefix)
+		}
+	}
+
+	// 从后向前查找已完成的任务
+	for i := len(tasks) - 1; i >= 0; i-- {
+		t := tasks[i]
+
+		// 跳过当前任务
+		if t.TaskID == currentTaskID {
+			continue
+		}
+
+		// 如果当前任务是并行任务，跳过同一并行组内的其他任务
+		if parallelGroupPrefix != "" && strings.HasPrefix(t.TaskKey, parallelGroupPrefix+"_") {
+			log.Printf("[WorkflowDomainService] Skipping parallel sibling task: %s", t.TaskKey)
+			continue
+		}
+
+		// 找到已完成的任务
+		if t.Status == status.TaskStatusCompleted && t.CompletedAt != nil {
+			log.Printf("[WorkflowDomainService] Found previous completed task: %s (TaskKey: %s)", t.TaskName, t.TaskKey)
+			return t
+		}
+	}
+
+	log.Printf("[WorkflowDomainService] No previous completed task found")
+	return nil
+}
+
+// FindStepDefinitionByTaskKey 根据 taskKey 查找步骤定义
+// 支持递归查找：可以在嵌套的 ParallelTasks 中查找
+// 注意：并行任务的 taskKey 是修改后的格式（如 parallel_approval_1），不是真实的步骤ID
+// 因此本方法只能查找真实的步骤定义，不能用于查找并行任务子任务
+func (s *WorkflowDomainService) FindStepDefinitionByTaskKey(taskKey string, definition *WorkflowDefinitionStruct) *StepDefinition {
+	if taskKey == "" || definition == nil {
+		return nil
+	}
+
+	// 尝试直接匹配顶层步骤或递归查找 ParallelTasks 中的步骤
+	step := s.findStepInList(taskKey, definition.Steps)
+	if step != nil {
+		return step
+	}
+
+	log.Printf("[WorkflowDomainService] Step definition not found for taskKey: %s", taskKey)
+	return nil
+}
+
+// findStepInList 在步骤列表中查找指定ID的步骤
+// 支持直接匹配和递归查找（在 ParallelTasks 中）
+func (s *WorkflowDomainService) findStepInList(stepID string, steps []StepDefinition) *StepDefinition {
+	for i := range steps {
+		if steps[i].ID == stepID {
+			return &steps[i]
+		}
+
+		// 递归查找：在并行任务中查找
+		if steps[i].Type == "parallel" && len(steps[i].ParallelTasks) > 0 {
+			if found := s.findStepInList(stepID, steps[i].ParallelTasks); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
+}
+
+// extractParallelTaskInfo 从 taskKey 中提取并行任务信息
+// 返回值：(parentStepID, index)
+// 如果不是并行任务，返回 ("", 0)
+func (s *WorkflowDomainService) extractParallelTaskInfo(taskKey string) (string, int) {
+	if taskKey == "" {
+		return "", 0
+	}
+
+	// 查找最后一个下划线
+	idx := strings.LastIndex(taskKey, "_")
+	if idx <= 0 || idx >= len(taskKey)-1 {
+		// 没有下划线，或下划线在末尾，都不是有效的并行任务格式
+		return "", 0
+	}
+
+	potentialSuffix := taskKey[idx+1:]
+	index, err := strconv.Atoi(potentialSuffix)
+	if err != nil {
+		// 后缀不是数字，不是并行任务
+		return "", 0
+	}
+
+	// 并行任务的序号从1开始，0是无效的
+	if index <= 0 {
+		log.Printf("[WorkflowDomainService] Invalid parallel task index: %d (must be > 0)", index)
+		return "", 0
+	}
+
+	parentStepID := taskKey[:idx]
+	return parentStepID, index
 }
 
 // findNextStep 查找下一个步骤

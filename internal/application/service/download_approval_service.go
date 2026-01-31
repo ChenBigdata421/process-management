@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"log"
-	"time"
 
 	"jxt-evidence-system/process-management/internal/application/command"
 	download_approval "jxt-evidence-system/process-management/internal/domain/aggregate/download_approval"
@@ -52,14 +51,15 @@ func (s *DownloadApprovalService) GetApprovalStatus(ctx context.Context, mediaID
 		ApprovalID:    approval.ID,
 		CanDownload:   approval.CanDownload(),
 		Status:        string(approval.Status),
+		RejectReason:  approval.RejectReason,
 		DownloadCount: approval.DownloadCount,
 	}
 
 	if approval.ApprovedAt != nil {
-		dto.ApprovedAt = approval.ApprovedAt.Format(time.RFC3339)
+		dto.ApprovedAt = *approval.ApprovedAt
 	}
 	if approval.ExpiredAt != nil {
-		dto.ExpiredAt = approval.ExpiredAt.Format(time.RFC3339)
+		dto.ExpiredAt = *approval.ExpiredAt
 	}
 	if approval.Status == download_approval.ApprovalStatusRejected {
 		dto.RejectReason = approval.RejectReason
@@ -140,6 +140,36 @@ func (s *DownloadApprovalService) ApproveDownload(ctx context.Context, instanceI
 	}
 
 	log.Printf("[DownloadApprovalService] Approved download: id=%d, mediaId=%d, expiredAt=%v", approval.ID, approval.MediaID, approval.ExpiredAt)
+	return nil
+}
+
+func (s *DownloadApprovalService) PendingDownload(ctx context.Context, instanceID valueobject.InstanceID) error {
+	approval, err := s.approvalRepo.FindByInstanceID(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+
+	approval.Pending()
+	if err := s.approvalRepo.Update(ctx, approval); err != nil {
+		return err
+	}
+
+	log.Printf("[DownloadApprovalService] Pending download: id=%d, mediaId=%d", approval.ID, approval.MediaID)
+	return nil
+}
+
+func (s *DownloadApprovalService) NoneDownload(ctx context.Context, instanceID valueobject.InstanceID) error {
+	approval, err := s.approvalRepo.FindByInstanceID(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+
+	approval.None()
+	if err := s.approvalRepo.Update(ctx, approval); err != nil {
+		return err
+	}
+
+	log.Printf("[DownloadApprovalService] None download: id=%d, mediaId=%d", approval.ID, approval.MediaID)
 	return nil
 }
 

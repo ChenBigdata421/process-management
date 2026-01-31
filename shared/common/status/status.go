@@ -17,6 +17,7 @@ const (
 	TaskStatusPending   TaskStatus = "pending"   // 待处理
 	TaskStatusCompleted TaskStatus = "completed" // 已完成
 	TaskStatusRejected  TaskStatus = "rejected"  // 已驳回
+	TaskStatusCancelled TaskStatus = "cancelled" // 已取消,在并行任务中，一个任务被驳回时，同组其他已完成的或者待处理的任务将被取消
 )
 
 // TaskPriority 任务优先级

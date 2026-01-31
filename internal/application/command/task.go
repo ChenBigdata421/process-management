@@ -17,6 +17,11 @@ type CompleteTaskCommand struct {
 	Result           status.TaskResult `json:"result"`
 }
 
+type CancelTaskCommand struct {
+	ID     valueobject.TaskID `uri:"id" binding:"required"`
+	UserID int
+}
+
 // UnmarshalJSON 自定义 JSON 解组，处理字符串化的 output
 func (c *CompleteTaskCommand) UnmarshalJSON(data []byte) error {
 	type Alias CompleteTaskCommand

@@ -42,7 +42,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		return
 	}
 
-	h.OK(c, gin.H{"id": id}, "创建任务成功")
+	h.OK(c, id, "创建任务成功")
 }
 
 // GetPage 列出所有任务（支持筛选）
@@ -319,6 +319,34 @@ func (h *TaskHandler) DelegateTask(c *gin.Context) {
 	}
 
 	h.OK(c, nil, "转办任务成功")
+}
+
+func (h *TaskHandler) CancelTask(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+
+	userID := jwtuser.GetUserId(c)
+	if userID == 0 {
+		logger.Error("获取用户ID失败")
+		h.Error(c, http.StatusInternalServerError, nil, "撤销任务失败")
+		return
+	}
+
+	var cmd command.CancelTaskCommand
+	if err := c.ShouldBindUri(&cmd); err != nil {
+		logger.Error("绑定批准任务命令的参数失败", "error", err)
+		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
+		return
+	}
+	cmd.UserID = int(userID)
+	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	if err := h.taskService.CancelTask(ctx, &cmd); err != nil {
+		logger.Error("撤销任务失败", "error", err)
+		h.Error(c, http.StatusInternalServerError, err, "撤销任务失败")
+		return
+	}
+
+	h.OK(c, nil, "撤销任务成功")
 }
 
 // GetTaskHistory 获取任务历史

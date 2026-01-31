@@ -92,6 +92,29 @@ func (h *taskService) DeleteTask(ctx context.Context, cmd *command.DeleteTaskCom
 	return h.taskRepo.Delete(ctx, cmd.ID)
 }
 
+func (h *taskService) CancelTask(ctx context.Context, cmd *command.CancelTaskCommand) error {
+
+	// 查找任务
+	task, err := h.taskRepo.FindByID(ctx, cmd.ID)
+	if err != nil {
+		return err
+	}
+
+	if task.Assignee != cmd.UserID {
+		return errors.ErrUnauthorized
+	}
+
+	// 只有待处理状态的任务才能撤销
+	if task.Status != status.TaskStatusPending {
+		return errors.ErrTaskNotPending
+	}
+
+	task.Status = status.TaskStatusCancelled
+
+	// 执行删除
+	return h.taskRepo.Update(ctx, task)
+}
+
 // 处理转办任务命令
 func (h *taskService) DelegateTask(ctx context.Context, cmd *command.DelegateTaskCommand) error {
 
@@ -117,7 +140,7 @@ func (h *taskService) DelegateTask(ctx context.Context, cmd *command.DelegateTas
 }
 
 // Handle 处理创建任务命令
-func (h *taskService) CreateTask(ctx context.Context, cmd *command.CreateTaskCommand) (string, error) {
+func (h *taskService) CreateTask(ctx context.Context, cmd *command.CreateTaskCommand) (valueobject.TaskID, error) {
 
 	// 创建新任务
 	task := task_aggregate.NewTask(cmd.InstanceID, cmd.WorkflowID)
@@ -137,10 +160,10 @@ func (h *taskService) CreateTask(ctx context.Context, cmd *command.CreateTaskCom
 
 	// 保存任务
 	if err := h.taskRepo.Save(ctx, task); err != nil {
-		return "", err
+		return valueobject.TaskID{}, err
 	}
 
-	return task.TaskID.String(), nil
+	return task.TaskID, nil
 }
 
 // GetTaskByID 根据ID获取任务

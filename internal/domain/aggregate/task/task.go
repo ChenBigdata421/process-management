@@ -26,7 +26,7 @@ type Task struct {
 	TaskKey     string                              `json:"taskKey"`
 	Description string                              `json:"description"`
 	TaskType    string                              `json:"taskType"`
-	IsFirstTask bool                                `json:"isFirstTask" gorm:"column:is_first_task;type:boolean;not null;default:false"`
+	IsFirstStep bool                                `json:"isFirstStep" gorm:"column:is_first_step;type:boolean;not null;default:false"`
 	Workflow    workflow_aggregate.Workflow         `json:"-"`
 	Instance    instance_aggregate.WorkflowInstance `json:"-"`
 	// 任务分配

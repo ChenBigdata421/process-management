@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log"
 
 	"jxt-evidence-system/process-management/internal/application/command"
 	"jxt-evidence-system/process-management/internal/application/service/port"
@@ -16,11 +17,12 @@ import (
 
 // DeleteInstanceHandler 删除工作流实例处理器
 type instanceService struct {
-	workflowService port.WorkflowService
-	instanceRepo    instance_repository.WorkflowInstanceRepository
-	taskService     port.TaskService
-	engineService   port.WorkflowEngineService
-	domainService   domain_service.WorkflowDomainService
+	workflowService     port.WorkflowService
+	instanceRepo        instance_repository.WorkflowInstanceRepository
+	taskService         port.TaskService
+	engineService       port.WorkflowEngineService
+	domainService       domain_service.WorkflowDomainService
+	downloadApprovalSvc *DownloadApprovalService
 }
 
 // CancelInstance 取消运行中的实例（仅标记状态，不删除记录）
@@ -31,6 +33,9 @@ func (h *instanceService) CancelInstance(ctx context.Context, cmd *command.Cance
 	}
 	if err := instance.Cancel(); err != nil {
 		return err
+	}
+	if err := h.downloadApprovalSvc.NoneDownload(ctx, instance.InstanceId); err != nil {
+		log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
 	}
 	return h.instanceRepo.Update(ctx, instance)
 }

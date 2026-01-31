@@ -1,12 +1,10 @@
 package service
 
 import (
-	"context"
 	"sync"
 
 	"jxt-evidence-system/process-management/internal/application/service/port"
 	download_approval_repository "jxt-evidence-system/process-management/internal/domain/aggregate/download_approval/repository"
-	instance_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/instance"
 	instance_repository "jxt-evidence-system/process-management/internal/domain/aggregate/instance/repository"
 	task_repository "jxt-evidence-system/process-management/internal/domain/aggregate/task/repository"
 	websocket "jxt-evidence-system/process-management/internal/domain/aggregate/task/websocket"
@@ -93,13 +91,15 @@ func registerInstanceServiceDependencies() {
 		engineService port.WorkflowEngineService,
 		taskService port.TaskService,
 		domainService *domain_service.WorkflowDomainService,
+		downloadApprovalSvc *DownloadApprovalService,
 	) port.InstanceService {
 		return &instanceService{
-			workflowService: workflowService,
-			instanceRepo:    instanceRepo,
-			engineService:   engineService,
-			taskService:     taskService,
-			domainService:   *domainService,
+			workflowService:     workflowService,
+			instanceRepo:        instanceRepo,
+			engineService:       engineService,
+			taskService:         taskService,
+			domainService:       *domainService,
+			downloadApprovalSvc: downloadApprovalSvc,
 		}
 	})
 	if err != nil {
@@ -125,14 +125,7 @@ func registerWorkflowEngineServiceDependencies() {
 		notificationSvc port.NotificationService,
 		downloadApprovalSvc *DownloadApprovalService,
 	) port.WorkflowEngineService {
-		engineSvc := NewWorkflowEngineServiceWithNotification(workflowRepo, instanceRepo, taskRepo, *domainService, notificationSvc)
-
-		// 设置工作流实例完成回调，用于更新下载审批状态
-		engineSvc.SetOnInstanceCompleted(func(ctx context.Context, instance *instance_aggregate.WorkflowInstance) error {
-			// 尝试更新下载审批状态为已通过
-			return downloadApprovalSvc.ApproveDownload(ctx, instance.InstanceId, 30) // 30天有效期
-		})
-
+		engineSvc := NewWorkflowEngineServiceWithNotification(workflowRepo, instanceRepo, taskRepo, *domainService, notificationSvc, downloadApprovalSvc)
 		return engineSvc
 	})
 	if err != nil {

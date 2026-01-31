@@ -18,6 +18,7 @@ import (
 	"jxt-evidence-system/process-management/shared/common/global"
 	"jxt-evidence-system/process-management/shared/common/status"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,8 +33,8 @@ type WorkflowEngineService struct {
 	instanceRepo        instance_repository.WorkflowInstanceRepository
 	taskRepo            task_repository.TaskRepository
 	domainService       domain_service.WorkflowDomainService
-	notificationSvc     port.NotificationService  // 通知服务（可选）
-	onInstanceCompleted InstanceCompletedCallback // 实例完成回调（可选）
+	notificationSvc     port.NotificationService // 通知服务（可选）
+	downloadApprovalSvc *DownloadApprovalService
 }
 
 // NewWorkflowEngineService 创建工作流引擎服务
@@ -59,24 +60,21 @@ func NewWorkflowEngineServiceWithNotification(
 	taskRepo task_repository.TaskRepository,
 	domainService domain_service.WorkflowDomainService,
 	notificationSvc port.NotificationService,
+	downloadApprovalSvc *DownloadApprovalService,
 ) *WorkflowEngineService {
 	return &WorkflowEngineService{
-		workflowRepo:    workflowRepo,
-		instanceRepo:    instanceRepo,
-		taskRepo:        taskRepo,
-		domainService:   domainService,
-		notificationSvc: notificationSvc,
+		workflowRepo:        workflowRepo,
+		instanceRepo:        instanceRepo,
+		taskRepo:            taskRepo,
+		domainService:       domainService,
+		notificationSvc:     notificationSvc,
+		downloadApprovalSvc: downloadApprovalSvc,
 	}
 }
 
 // SetNotificationService 设置通知服务
 func (s *WorkflowEngineService) SetNotificationService(svc port.NotificationService) {
 	s.notificationSvc = svc
-}
-
-// SetOnInstanceCompleted 设置实例完成回调
-func (s *WorkflowEngineService) SetOnInstanceCompleted(callback InstanceCompletedCallback) {
-	s.onInstanceCompleted = callback
 }
 
 // StepDefinition 步骤定义（从领域服务导入）
@@ -243,11 +241,9 @@ func (s *WorkflowEngineService) completeInstance(ctx context.Context, instance *
 		return fmt.Errorf("failed to update instance: %w", err)
 	}
 
-	// 触发工作流完成回调（用于更新下载审批等业务状态）
-	if s.onInstanceCompleted != nil {
-		if err := s.onInstanceCompleted(ctx, instance); err != nil {
-			log.Printf("[EngineService] Instance completed callback failed: %v", err)
-		}
+	// 用于更新下载审批等业务状态
+	if err := s.downloadApprovalSvc.ApproveDownload(ctx, instance.InstanceId, 30); err != nil {
+		log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
 	}
 
 	log.Printf("[EngineService] Instance completed successfully")
@@ -269,6 +265,10 @@ func (s *WorkflowEngineService) ContinueAfterTask(ctx context.Context, task *tas
 		return fmt.Errorf("instance not found: %s", task.InstanceID.String())
 	}
 
+	if instance.Status != status.InstanceStatusRunning {
+		return fmt.Errorf("instance is not running: %s", instance.InstanceId.String())
+	}
+
 	// 获取工作流定义
 	wf, err := s.workflowRepo.FindByID(ctx, instance.WorkflowID)
 	if err != nil {
@@ -285,48 +285,196 @@ func (s *WorkflowEngineService) ContinueAfterTask(ctx context.Context, task *tas
 		return fmt.Errorf("failed to parse workflow definition: %w", err)
 	}
 
-	// 找到当前步骤
-	var currentStep *StepDefinition
-	for i := range definition.Steps {
-		if definition.Steps[i].ID == task.TaskKey {
-			currentStep = &definition.Steps[i]
-			break
+	// 检查当前任务是否是并行任务的子任务
+	// 并行子任务的 taskKey 格式为：parallel_step_id_1, parallel_step_id_2
+	var parentStepID string
+	var isParallelSubTask bool
+	if idx := strings.LastIndex(task.TaskKey, "_"); idx > 0 {
+		potentialSuffix := task.TaskKey[idx+1:]
+		if _, err := strconv.Atoi(potentialSuffix); err == nil {
+			// 是并行子任务
+			parentStepID = task.TaskKey[:idx]
+			isParallelSubTask = true
+			log.Printf("[EngineService] Detected parallel sub-task, parent step ID: %s", parentStepID)
 		}
 	}
 
-	if currentStep == nil {
-		return fmt.Errorf("current step not found: %s", task.TaskKey)
-	}
-
-	// 检查是否是并行任务的一部分
-	// 注意：只有当步骤类型是 "parallel" 时才需要检查并行任务
-	// 不能简单地根据 taskKey 包含 "_" 来判断，因为步骤ID本身就可能包含 "_"
-	if currentStep != nil && currentStep.Type == "parallel" {
-		// 检查该并行步骤的所有任务是否都已完成
-		allCompleted, err := s.checkParallelTasksCompleted(ctx, instance, currentStep.ID)
+	// 如果是并行子任务，检查该并行组的所有任务是否都已完成
+	if isParallelSubTask {
+		allCompleted, err := s.checkParallelTasksCompleted(ctx, instance, parentStepID)
 		if err != nil {
 			log.Printf("[EngineService] Failed to check parallel tasks: %v", err)
-		} else if !allCompleted {
-			log.Printf("[EngineService] Not all parallel tasks completed yet, waiting")
+			return fmt.Errorf("failed to check parallel tasks: %w", err)
+		}
+
+		if !allCompleted {
+			log.Printf("[EngineService] Not all parallel tasks completed yet for group %s, waiting", parentStepID)
 			return nil // 还有其他并行任务未完成，暂不继续
 		}
-		log.Printf("[EngineService] All parallel tasks for step %s completed", currentStep.ID)
+
+		log.Printf("[EngineService] All parallel tasks for group %s completed, continuing", parentStepID)
 	}
 
-	// 更新实例状态为运行中
-	instance.Status = status.InstanceStatusRunning
-
-	if err := s.instanceRepo.Update(ctx, instance); err != nil {
-		return fmt.Errorf("failed to update instance: %w", err)
+	// 找到当前步骤定义（支持并行任务的父步骤查找）
+	currentStep := s.domainService.FindStepDefinitionByTaskKey(task.TaskKey, &definition)
+	if currentStep == nil {
+		return fmt.Errorf("current step not found for taskKey: %s", task.TaskKey)
 	}
 
-	log.Printf("[EngineService] Instance resumed, finding next step")
+	log.Printf("[EngineService] Found current step: %s (type: %s)", currentStep.Name, currentStep.Type)
 
+	// 用于更新下载审批等业务状态
+	if currentStep.IsRoot {
+		if err := s.downloadApprovalSvc.PendingDownload(ctx, instance.InstanceId); err != nil {
+			log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
+		}
+
+	}
 	// 执行下一步
 	return s.executeNextStep(ctx, instance, currentStep, &definition)
 }
 
+// cancelParallelGroupTasks 取消并行组中的其他任务
+// 当并行任务中的一个被驳回时，取消同组中其他已完成或待处理的任务
+func (s *WorkflowEngineService) cancelParallelGroupTasks(ctx context.Context, tasks []*task_aggregate.Task, rejectedTask *task_aggregate.Task) error {
+	// 提取并行组前缀
+	idx := strings.LastIndex(rejectedTask.TaskKey, "_")
+	if idx <= 0 {
+		return nil // 不是并行任务
+	}
+
+	potentialSuffix := rejectedTask.TaskKey[idx+1:]
+	if _, err := strconv.Atoi(potentialSuffix); err != nil {
+		return nil // 后缀不是数字，不是并行任务
+	}
+
+	parallelGroupPrefix := rejectedTask.TaskKey[:idx]
+	log.Printf("[EngineService] Cancelling parallel group tasks: %s", parallelGroupPrefix)
+
+	var cancelledCount int
+	for _, t := range tasks {
+		if t.TaskID == rejectedTask.TaskID {
+			continue // 跳过被驳回的任务本身
+		}
+
+		// 检查是否是同一并行组的任务
+		if strings.HasPrefix(t.TaskKey, parallelGroupPrefix+"_") {
+			if t.Status == status.TaskStatusCompleted || t.Status == status.TaskStatusPending {
+				t.Status = status.TaskStatusCancelled
+				if err := s.taskRepo.Update(ctx, t); err != nil {
+					log.Printf("[EngineService] Failed to cancel parallel task %s: %v", t.TaskKey, err)
+				} else {
+					cancelledCount++
+					log.Printf("[EngineService] Cancelled parallel task: %s", t.TaskKey)
+				}
+			}
+		}
+	}
+
+	if cancelledCount > 0 {
+		log.Printf("[EngineService] Cancelled %d tasks in parallel group %s", cancelledCount, parallelGroupPrefix)
+	}
+
+	return nil
+}
+
+// createParallelTasks 创建并行任务
+// 根据并行步骤定义和原任务信息创建新的并行任务
+func (s *WorkflowEngineService) createParallelTasks(ctx context.Context, instance *instance_aggregate.WorkflowInstance, previousStep *StepDefinition, previousTaskInfo *domain_service.PreviousTaskInfo, taskHistories []command.TaskHistoryItem) error {
+	log.Printf("[EngineService] Creating parallel tasks for step: %s", previousStep.Name)
+
+	for i, parallelStepDef := range previousStep.ParallelTasks {
+		// 查找原来的任务，获取原始的 assignee
+		var originalAssignee int
+		originalTaskKey := fmt.Sprintf("%s_%d", previousTaskInfo.StepID, i+1)
+		for _, oldTask := range previousTaskInfo.ParallelTasks {
+			if oldTask.TaskKey == originalTaskKey {
+				originalAssignee = oldTask.Assignee
+				break
+			}
+		}
+
+		// 创建新的并行任务
+		newTask := task_aggregate.NewTask(instance.InstanceId, instance.WorkflowID)
+
+		// 创建并行任务的副本，修改其ID以包含父步骤前缀
+		parallelStepCopy := parallelStepDef
+		parallelStepCopy.ID = fmt.Sprintf("%s_%d", previousStep.ID, i+1)
+
+		// 应用步骤参数
+		s.domainService.ApplyStepParamsToTask(newTask, &parallelStepCopy, instance)
+
+		// 优先使用原任务的处理人
+		if originalAssignee != 0 {
+			newTask.Assignee = originalAssignee
+		}
+
+		// 构建任务数据
+		newTask.TaskData = s.domainService.BuildTaskData(instance, taskHistories, nil)
+
+		// 保存任务
+		if err := s.taskRepo.Save(ctx, newTask); err != nil {
+			log.Printf("[EngineService] Failed to save parallel task %s: %v", parallelStepCopy.ID, err)
+			continue
+		}
+
+		log.Printf("[EngineService] Created parallel task: %s (Assignee: %d)", newTask.TaskName, newTask.Assignee)
+
+		// 发送通知
+		if s.notificationSvc != nil && originalAssignee != 0 {
+			s.notificationSvc.NotifyTaskAssigned(ctx, newTask, originalAssignee)
+		}
+	}
+
+	return nil
+}
+
+// createSingleTask 创建单个任务
+// 根据步骤定义和原任务信息创建新的单个任务
+func (s *WorkflowEngineService) createSingleTask(ctx context.Context, instance *instance_aggregate.WorkflowInstance, previousStep *StepDefinition, previousTask *task_aggregate.Task, taskHistories []command.TaskHistoryItem) error {
+	log.Printf("[EngineService] Creating single task for step: %s", previousStep.Name)
+
+	// 创建新任务
+	newTask := task_aggregate.NewTask(instance.InstanceId, instance.WorkflowID)
+	newTask.TaskType = previousStep.Type
+	newTask.Description = previousStep.Description
+
+	s.domainService.ApplyStepParamsToTask(newTask, previousStep, instance)
+
+	// 设置任务分配：优先使用上一个任务的处理人
+	if previousTask.Assignee != 0 {
+		newTask.Assignee = previousTask.Assignee
+	}
+
+	// 构建任务数据
+	newTask.TaskData = s.domainService.BuildTaskData(instance, taskHistories, nil)
+
+	// 保存新任务
+	if err := s.taskRepo.Save(ctx, newTask); err != nil {
+		return fmt.Errorf("failed to save new task: %w", err)
+	}
+
+	log.Printf("[EngineService] Created new task for previous step: %s", newTask.TaskID.String())
+
+	// 发送通知
+	if s.notificationSvc != nil {
+		s.notificationSvc.NotifyTaskAssigned(ctx, newTask, previousTask.Assignee)
+	}
+
+	return nil
+}
+
+// updateInstanceStatusToRunning 更新实例状态为运行中
+func (s *WorkflowEngineService) updateInstanceStatusToRunning(ctx context.Context, instance *instance_aggregate.WorkflowInstance) error {
+	instance.Status = status.InstanceStatusRunning
+	if err := s.instanceRepo.Update(ctx, instance); err != nil {
+		return fmt.Errorf("failed to update instance status: %w", err)
+	}
+	return nil
+}
+
 // RejectAndGoBack 驳回任务并回退到上一个步骤
+// 支持并行任务场景：如果上一步是并行任务组，会重新创建该组的所有并行任务
 func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_aggregate.Task) error {
 	log.Printf("[EngineService] Rejecting task and going back: %s", task.TaskID.String())
 
@@ -337,6 +485,10 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 	}
 	if instance == nil {
 		return fmt.Errorf("instance not found: %s", task.InstanceID.String())
+	}
+
+	if instance.Status != status.InstanceStatusRunning {
+		return fmt.Errorf("instance is not running: %s", instance.InstanceId.String())
 	}
 
 	// 获取工作流定义
@@ -356,57 +508,89 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 
 	tasks, err := s.taskRepo.FindByInstanceID(ctx, instance.InstanceId)
 	if err != nil {
-		return fmt.Errorf("查找实例的任务失败")
+		return fmt.Errorf("查找实例的任务失败: %w", err)
 	}
 
 	if len(tasks) == 0 {
 		return fmt.Errorf("没有发现实例: %s的任务", instance.InstanceId.String())
 	}
 
-	// 找出当前任务之前最后完成的任务
-	previousTask := s.domainService.FindPreviousCompletedTask(tasks, task.TaskID)
-	if previousTask == nil {
+	// 特殊场景：检查当前被驳回的任务是否属于并行任务组
+	// 如果是并行任务中的一个被驳回，需要取消同组中其他已完成的任务
+	if err := s.cancelParallelGroupTasks(ctx, tasks, task); err != nil {
+		log.Printf("[EngineService] Error cancelling parallel group tasks: %v", err)
+		// 不中断流程，继续处理驳回
+	}
+
+	// 查找上一个任务的完整信息（支持并行任务组）
+	previousTaskInfo := s.domainService.FindPreviousTaskInfo(tasks, task.TaskID)
+	if previousTaskInfo == nil {
 		return fmt.Errorf("cannot reject first task, no previous completed task found")
 	}
 
-	log.Printf("[EngineService] Found previous task: %s (TaskKey: %s, Assignee: %s)", previousTask.TaskName, previousTask.TaskKey, previousTask.Assignee)
-
-	// 从工作流定义中查找对应的步骤定义
-	previousStep := s.domainService.FindStepByID(previousTask.TaskKey, &definition)
-	if previousStep == nil {
-		return fmt.Errorf("step definition not found for task key: %s", previousTask.TaskKey)
-	}
-
-	log.Printf("[EngineService] Found step definition: %s (%s)", previousStep.Name, previousStep.ID)
-
-	// 创建新任务回退到上一个步骤
-	newTask := task_aggregate.NewTask(instance.InstanceId, instance.WorkflowID)
-	newTask.TaskType = previousStep.Type
-	newTask.Description = previousStep.Description
-
-	s.domainService.ApplyStepParamsToTask(newTask, previousStep, instance)
-
-	// 设置任务分配：优先使用上一个任务的处理人
-	previousTaskAssignee := previousTask.Assignee
-	if previousTask.Assignee != 0 {
-		newTask.Assignee = previousTask.Assignee
-		log.Printf("[EngineService] Set assignee from previous task: %s", previousTask.Assignee)
-	}
-
-	// 构建任务历史和任务数据
+	// 构建任务历史
 	taskHistories := s.domainService.BuildTaskHistories(tasks)
-	newTask.TaskData = s.domainService.BuildTaskData(instance, taskHistories, nil)
 
-	// 保存新任务
-	if err := s.taskRepo.Save(ctx, newTask); err != nil {
-		return fmt.Errorf("failed to save new task: %w", err)
-	}
+	// 根据上一步是否为并行任务组，采取不同的处理策略
+	if previousTaskInfo.IsParallelGroup {
+		// 场景1：驳回到并行任务组
+		log.Printf("[EngineService] Previous step is parallel group: %s with %d tasks",
+			previousTaskInfo.StepID, len(previousTaskInfo.ParallelTasks))
 
-	log.Printf("[EngineService] Created new task for previous step: %s", newTask.TaskID.String())
+		// 查找并行步骤定义
+		previousStep := s.domainService.FindStepDefinitionByTaskKey(previousTaskInfo.StepID, &definition)
+		if previousStep == nil {
+			return fmt.Errorf("parallel step definition not found for step ID: %s", previousTaskInfo.StepID)
+		}
 
-	// 发送通知（如果有通知服务）
-	if s.notificationSvc != nil {
-		s.notificationSvc.NotifyTaskAssigned(ctx, newTask, previousTaskAssignee)
+		if previousStep.Type != "parallel" {
+			return fmt.Errorf("expected parallel step type, got: %s", previousStep.Type)
+		}
+
+		log.Printf("[EngineService] Found parallel step definition: %s with %d parallel tasks",
+			previousStep.Name, len(previousStep.ParallelTasks))
+
+		// 创建并行任务
+		if err := s.createParallelTasks(ctx, instance, previousStep, previousTaskInfo, taskHistories); err != nil {
+			return fmt.Errorf("failed to create parallel tasks: %w", err)
+		}
+
+		// 更新实例状态为运行中（等待并行任务完成）
+		if err := s.updateInstanceStatusToRunning(ctx, instance); err != nil {
+			return err
+		}
+
+	} else {
+		// 场景2：驳回到单个任务
+		previousTask := previousTaskInfo.SingleTask
+		log.Printf("[EngineService] Previous step is single task: %s (TaskKey: %s, Assignee: %d)",
+			previousTask.TaskName, previousTask.TaskKey, previousTask.Assignee)
+
+		// 从工作流定义中查找对应的步骤定义
+		previousStep := s.domainService.FindStepDefinitionByTaskKey(previousTask.TaskKey, &definition)
+		if previousStep == nil {
+			return fmt.Errorf("step definition not found for task key: %s", previousTask.TaskKey)
+		}
+
+		log.Printf("[EngineService] Found step definition: %s (%s)", previousStep.Name, previousStep.ID)
+
+		// 创建单个任务
+		if err := s.createSingleTask(ctx, instance, previousStep, previousTask, taskHistories); err != nil {
+			return err
+		}
+
+		// 用于更新下载审批等业务状态
+		if previousStep.IsRoot {
+			if err := s.downloadApprovalSvc.RejectDownload(ctx, instance.InstanceId, task.Comment); err != nil {
+				log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
+			}
+
+		}
+
+		// 更新实例状态为运行中（等待新任务完成）
+		if err := s.updateInstanceStatusToRunning(ctx, instance); err != nil {
+			return err
+		}
 	}
 
 	log.Printf("[EngineService] Task rejection and rollback completed successfully")
@@ -441,7 +625,7 @@ func (s *WorkflowEngineService) executeParallelTasks(ctx context.Context, instan
 
 	// 创建所有并行任务
 	var createdTasks []string
-	for _, parallelStep := range step.ParallelTasks {
+	for i, parallelStep := range step.ParallelTasks {
 		// 检查条件
 		if parallelStep.Condition != "" {
 			if !s.domainService.EvaluateCondition(parallelStep.Condition, instance) {
@@ -450,20 +634,28 @@ func (s *WorkflowEngineService) executeParallelTasks(ctx context.Context, instan
 			}
 		}
 
+		// 创建并行任务的副本，修改其ID以包含父步骤前缀
+		// 例如：parallel_approval -> parallel_approval_1, parallel_approval_2
+		parallelStepCopy := parallelStep
+		originalID := parallelStepCopy.ID
+		parallelStepCopy.ID = fmt.Sprintf("%s_%d", step.ID, i+1)
+
+		log.Printf("[EngineService] Creating parallel task: %s (original: %s)", parallelStepCopy.ID, originalID)
+
 		// 执行并行步骤（通常是 user_task）
-		if parallelStep.Type == "userTask" {
-			if err := s.executeUserTask(ctx, instance, &parallelStep); err != nil {
-				log.Printf("[EngineService] Failed to create parallel task %s: %v", parallelStep.Name, err)
+		if parallelStepCopy.Type == "userTask" {
+			if err := s.executeUserTask(ctx, instance, &parallelStepCopy); err != nil {
+				log.Printf("[EngineService] Failed to create parallel task %s: %v", parallelStepCopy.Name, err)
 				continue
 			}
-			createdTasks = append(createdTasks, parallelStep.ID)
+			createdTasks = append(createdTasks, parallelStepCopy.ID)
 		}
-		if parallelStep.Type == "process" {
-			if err := s.executeProcessTask(ctx, instance, &parallelStep, definition); err != nil {
-				log.Printf("[EngineService] Failed to execute parallel task %s: %v", parallelStep.Name, err)
+		if parallelStepCopy.Type == "process" {
+			if err := s.executeProcessTask(ctx, instance, &parallelStepCopy, definition); err != nil {
+				log.Printf("[EngineService] Failed to execute parallel task %s: %v", parallelStepCopy.Name, err)
 				continue
 			}
-			createdTasks = append(createdTasks, parallelStep.ID)
+			createdTasks = append(createdTasks, parallelStepCopy.ID)
 		}
 	}
 
@@ -496,9 +688,8 @@ func (s *WorkflowEngineService) checkParallelTasksCompleted(ctx context.Context,
 	}
 
 	// 检查是否所有并行任务都已完成
-	// 注意：rejected 状态的任务也视为"已完成"，因为它已经被回退任务替代
 	for _, task := range parallelTasks {
-		if task.Status != status.TaskStatusCompleted && task.Status != status.TaskStatusRejected {
+		if task.Status == status.TaskStatusPending {
 			log.Printf("[EngineService] Parallel task %s not completed yet (status: %s)", task.TaskID.String(), task.Status)
 			return false, nil
 		}

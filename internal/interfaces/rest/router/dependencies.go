@@ -95,7 +95,7 @@ func registerInstanceRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddl
 				r.GET("", handler.GetPage)
 				r.POST("", handler.StartInstance)
 				r.GET("/:id", handler.GetInstance)
-				r.GET("/:id/cancel", handler.CancelInstance)
+				r.PUT("/:id/cancel", handler.CancelInstance)
 				r.GET("/:id/detail", handler.GetInstanceDetail)
 				r.DELETE("/:id", handler.DeleteInstance)
 				r.GET("/workflow/:workflow_id", handler.GetInstancesByWorkflow)
@@ -125,6 +125,7 @@ func registerTaskRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddlewar
 				r.POST("/:id/approve", handler.ApproveTask)                            // 批准任务
 				r.POST("/:id/reject", handler.RejectTask)                              // 驳回任务
 				r.POST("/:id/delegate", handler.DelegateTask)                          // 转办任务
+				r.PUT("/:id/cancel", handler.CancelTask)                               // 撤销任务
 				r.DELETE("/:id", handler.DeleteTask)                                   // 删除任务
 				r.GET("/:id/history", handler.GetTaskHistory)                          // 任务历史
 				r.GET("/instance/:instanceId/recent", handler.GetRecentTask)           // 实例最近任务

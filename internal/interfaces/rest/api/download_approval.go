@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"jxt-evidence-system/process-management/internal/application/command"
 	"jxt-evidence-system/process-management/internal/application/service"
 	"jxt-evidence-system/process-management/internal/application/service/port"
-	"jxt-evidence-system/process-management/internal/domain/valueobject"
 	"jxt-evidence-system/process-management/shared/common/global"
 	"jxt-evidence-system/process-management/shared/common/restapi"
 
@@ -183,40 +181,4 @@ func (h *DownloadApprovalHandler) RecordDownload(c *gin.Context) {
 	}
 
 	h.OK(c, nil, "记录成功")
-}
-
-const mediaDownloadWorkflowName = "媒体下载申请流程"
-
-// startDownloadApprovalWorkflow 启动下载审批工作流
-func (h *DownloadApprovalHandler) startDownloadApprovalWorkflow(ctx context.Context, mediaID valueobject.MediaID, userID int64, reason string) (valueobject.InstanceID, error) {
-	if h.workflowService == nil {
-		return valueobject.InstanceID{}, fmt.Errorf("workflow service not initialized")
-	}
-
-	workflow, err := h.workflowService.GetWorkflowByName(ctx, mediaDownloadWorkflowName)
-	if err != nil {
-		return valueobject.InstanceID{}, fmt.Errorf("failed to find workflow %s: %w", mediaDownloadWorkflowName, err)
-	}
-
-	payload := map[string]interface{}{
-		"mediaId":     mediaID,
-		"reason":      reason,
-		"applicantId": userID,
-	}
-	input, err := json.Marshal(payload)
-	if err != nil {
-		return valueobject.InstanceID{}, fmt.Errorf("failed to marshal workflow input: %w", err)
-	}
-
-	cmd := command.StartWorkflowInstanceCommand{
-		ID:    workflow.WorkflowID,
-		Input: input,
-	}
-
-	instanceID, err := h.instanceService.StartWorkflowInstance(ctx, &cmd)
-	if err != nil {
-		return valueobject.InstanceID{}, fmt.Errorf("failed to start workflow instance: %w", err)
-	}
-
-	return instanceID, nil
 }
