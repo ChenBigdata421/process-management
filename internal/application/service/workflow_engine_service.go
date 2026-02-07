@@ -17,6 +17,8 @@ import (
 	errors_ "jxt-evidence-system/process-management/shared/common/errors"
 	"jxt-evidence-system/process-management/shared/common/global"
 	"jxt-evidence-system/process-management/shared/common/status"
+	"jxt-evidence-system/process-management/shared/domain/event"
+	event_repository "jxt-evidence-system/process-management/shared/domain/event/repository"
 	"log"
 	"strconv"
 	"strings"
@@ -35,6 +37,8 @@ type WorkflowEngineService struct {
 	domainService       domain_service.WorkflowDomainService
 	notificationSvc     port.NotificationService // 通知服务（可选）
 	downloadApprovalSvc *DownloadApprovalService
+	deleteApprovalSvc   *DeleteApprovalService
+	outboxRepo          event_repository.OutboxRepository
 }
 
 // NewWorkflowEngineService 创建工作流引擎服务
@@ -61,6 +65,8 @@ func NewWorkflowEngineServiceWithNotification(
 	domainService domain_service.WorkflowDomainService,
 	notificationSvc port.NotificationService,
 	downloadApprovalSvc *DownloadApprovalService,
+	deleteApprovalSvc *DeleteApprovalService,
+	outboxRepo event_repository.OutboxRepository,
 ) *WorkflowEngineService {
 	return &WorkflowEngineService{
 		workflowRepo:        workflowRepo,
@@ -69,6 +75,8 @@ func NewWorkflowEngineServiceWithNotification(
 		domainService:       domainService,
 		notificationSvc:     notificationSvc,
 		downloadApprovalSvc: downloadApprovalSvc,
+		deleteApprovalSvc:   deleteApprovalSvc,
+		outboxRepo:          outboxRepo,
 	}
 }
 
@@ -212,6 +220,75 @@ func (s *WorkflowEngineService) executeProcessTask(ctx context.Context, instance
 	s.domainService.ApplyStepParamsToTask(task, step, instance)
 	task.Status = status.TaskStatusCompleted
 	task.Result = status.TaskResultApproved
+
+	wf, err := s.workflowRepo.FindByID(ctx, instance.WorkflowID)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(wf.Name, "删除") {
+		// 从instance的Input中提取mediaId、mediaName和firstAssignee
+		var inputData map[string]interface{}
+		if err := json.Unmarshal(instance.Input, &inputData); err != nil {
+			log.Printf("[EngineService] Failed to parse instance input: %v", err)
+			return fmt.Errorf("failed to parse instance input: %w", err)
+		}
+
+		// 提取mediaId（字符串）
+		mediaID := ""
+		if val, ok := inputData["mediaId"]; ok {
+			mediaID = fmt.Sprintf("%v", val)
+		}
+
+		// 提取mediaName（字符串）
+		mediaName := ""
+		if val, ok := inputData["mediaName"]; ok {
+			mediaName = fmt.Sprintf("%v", val)
+		}
+
+		// 提取firstAssignee（整型）
+		firstAssignee := 0
+		if val, ok := inputData["firstAssignee"]; ok {
+			switch v := val.(type) {
+			case float64:
+				firstAssignee = int(v)
+			case int:
+				firstAssignee = v
+			case string:
+				if num, err := strconv.Atoi(v); err == nil {
+					firstAssignee = num
+				}
+			}
+		}
+
+		// 发布媒体删除事件
+		mediaDeletedEvent := event.NewProcessMediaDeletedEvent(
+			task.TaskID.String(),
+			mediaID,
+			firstAssignee,
+			time.Now(),
+		)
+
+		// 保存事件到 outbox（使用默认租户）
+		ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+		if err := s.outboxRepo.Save(ctx, mediaDeletedEvent); err != nil {
+			log.Printf("[EngineService] Failed to save media deleted event: %v", err)
+			// 删除失败，写入 task.Output
+			outputData := map[string]interface{}{
+				"mediaName": mediaName,
+				"result":    "删除失败",
+			}
+			outputBytes, _ := json.Marshal(outputData)
+			task.Output = outputBytes
+		} else {
+			// 删除成功，写入 task.Output
+			outputData := map[string]interface{}{
+				"mediaName": mediaName,
+				"result":    "删除成功",
+			}
+			outputBytes, _ := json.Marshal(outputData)
+			task.Output = outputBytes
+		}
+	}
 	// 保存任务
 	if err := s.taskRepo.Save(ctx, task); err != nil {
 		return fmt.Errorf("failed to save task: %w", err)
@@ -240,10 +317,20 @@ func (s *WorkflowEngineService) completeInstance(ctx context.Context, instance *
 	if err := s.instanceRepo.Update(ctx, instance); err != nil {
 		return fmt.Errorf("failed to update instance: %w", err)
 	}
-
-	// 用于更新下载审批等业务状态
-	if err := s.downloadApprovalSvc.ApproveDownload(ctx, instance.InstanceId, 30); err != nil {
-		log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
+	wf, err := s.workflowRepo.FindByID(ctx, instance.WorkflowID)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(wf.Name, "下载") {
+		// 用于更新下载审批等业务状态
+		if err := s.downloadApprovalSvc.ApproveDownload(ctx, instance.InstanceId, 30); err != nil {
+			log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
+		}
+	} else if strings.Contains(wf.Name, "删除") {
+		// 用于更新删除审批等业务状态
+		if err := s.deleteApprovalSvc.ApproveDelete(ctx, instance.InstanceId); err != nil {
+			log.Printf("[EngineService] 更新删除审批业务状态失败！: %v", err)
+		}
 	}
 
 	log.Printf("[EngineService] Instance completed successfully")
@@ -323,12 +410,19 @@ func (s *WorkflowEngineService) ContinueAfterTask(ctx context.Context, task *tas
 
 	log.Printf("[EngineService] Found current step: %s (type: %s)", currentStep.Name, currentStep.Type)
 
-	// 用于更新下载审批等业务状态
 	if currentStep.IsRoot {
-		if err := s.downloadApprovalSvc.PendingDownload(ctx, instance.InstanceId); err != nil {
-			log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
+		// 用于更新下载审批等业务状态
+		if strings.Contains(wf.Name, "下载") {
+			// 下载审批分支
+			if err := s.downloadApprovalSvc.PendingDownload(ctx, instance.InstanceId); err != nil {
+				log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
+			}
+		} else if strings.Contains(wf.Name, "删除") {
+			// 删除审批分支
+			if err := s.deleteApprovalSvc.PendingDelete(ctx, instance.InstanceId); err != nil {
+				log.Printf("[EngineService] 更新删除审批业务状态失败！: %v", err)
+			}
 		}
-
 	}
 	// 执行下一步
 	return s.executeNextStep(ctx, instance, currentStep, &definition)
@@ -523,10 +617,14 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 	}
 
 	// 查找上一个任务的完整信息（支持并行任务组）
+	log.Printf("[EngineService] Looking for previous task info for task: %s", task.TaskID.String())
 	previousTaskInfo := s.domainService.FindPreviousTaskInfo(tasks, task.TaskID)
 	if previousTaskInfo == nil {
+		log.Printf("[EngineService] No previous task found for task: %s", task.TaskID.String())
 		return fmt.Errorf("cannot reject first task, no previous completed task found")
 	}
+	log.Printf("[EngineService] Found previous task info: IsParallelGroup=%v, StepID=%s",
+		previousTaskInfo.IsParallelGroup, previousTaskInfo.StepID)
 
 	// 构建任务历史
 	taskHistories := s.domainService.BuildTaskHistories(tasks)
@@ -581,10 +679,15 @@ func (s *WorkflowEngineService) RejectAndGoBack(ctx context.Context, task *task_
 
 		// 用于更新下载审批等业务状态
 		if previousStep.IsRoot {
-			if err := s.downloadApprovalSvc.RejectDownload(ctx, instance.InstanceId, task.Comment); err != nil {
-				log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
+			if strings.Contains(wf.Name, "下载") {
+				if err := s.downloadApprovalSvc.RejectDownload(ctx, instance.InstanceId, task.Comment); err != nil {
+					log.Printf("[EngineService] 更新下载审批业务状态失败！: %v", err)
+				}
+			} else if strings.Contains(wf.Name, "删除") {
+				if err := s.deleteApprovalSvc.RejectDelete(ctx, instance.InstanceId, task.Comment); err != nil {
+					log.Printf("[EngineService] 更新删除审批业务状态失败！: %v", err)
+				}
 			}
-
 		}
 
 		// 更新实例状态为运行中（等待新任务完成）

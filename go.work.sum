@@ -15,6 +15,10 @@ cloud.google.com/go/monitoring v1.21.2/go.mod h1:hS3pXvaG8KgWTSz+dAdyzPrGUYmi2Q+
 cloud.google.com/go/storage v1.49.0 h1:zenOPBOWHCnojRd9aJZAyQXBYqkJkdQS42dxL55CIMw=
 cloud.google.com/go/storage v1.49.0/go.mod h1:k1eHhhpLvrPjVGfo0mOUPEJ4Y2+a/Hv5PiwehZI9qGU=
 github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
+github.com/ChenBigdata421/jxt-core v1.1.26-0.20260207023725-d541016936c8 h1:lJWSkFX6gjaszeo2z79S1Sp1YsyS0Jze8cEXCfn14YM=
+github.com/ChenBigdata421/jxt-core v1.1.26-0.20260207023725-d541016936c8/go.mod h1:Ni8VEBKXGu/wYqHurGN4H+zrtH2tVwcoxOFExxr5Zk4=
+github.com/ChenBigdata421/jxt-core v1.1.26-0.20260207090439-abbe1a2a7681 h1:HAxKtHEHq5ImxbHPVmlet7GvRIbknjBv+75ggvr0ELA=
+github.com/ChenBigdata421/jxt-core v1.1.26-0.20260207090439-abbe1a2a7681/go.mod h1:Ni8VEBKXGu/wYqHurGN4H+zrtH2tVwcoxOFExxr5Zk4=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.25.0 h1:3c8yed4lgqTt+oTQ+JNMDo+F4xprBf+O/il4ZC0nRLw=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.25.0/go.mod h1:obipzmGjfSjam60XLwGfqUkJsfiheAl+TUjG+4yzyPM=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.48.1 h1:UQ0AhxogsIRZDkElkblfnwjc3IaltCm2HUMvezQaL7s=

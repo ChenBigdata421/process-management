@@ -53,22 +53,27 @@ func (h taskService) CompleteTask(ctx context.Context, cmd *command.CompleteTask
 	}
 
 	// 🆕 任务完成后，根据结果自动推进流程或回退
+	log.Printf("[CompleteTaskHandler] Task completed with result: %s, engineService: %v", cmd.Result, h.engineService != nil)
 	if h.engineService != nil {
 		if cmd.Result == status.TaskResultRejected {
 			// 驳回：回退到上一个步骤
+			log.Printf("[CompleteTaskHandler] Starting RejectAndGoBack for task: %s", task.TaskID.String())
 			if err := h.engineService.RejectAndGoBack(ctx, task); err != nil {
 				// 记录错误但不影响任务完成
 				log.Printf("[CompleteTaskHandler] RejectAndGoBack failed: %v", err)
 			} else {
-				log.Printf("[CompleteTaskHandler] RejectAndGoBack succeeded")
+				log.Printf("[CompleteTaskHandler] RejectAndGoBack succeeded for task: %s", task.TaskID.String())
 			}
 		} else if cmd.Result == status.TaskResultApproved || cmd.Result == status.TaskResultCompleted {
 			// 通过/完成：继续下一步
+			log.Printf("[CompleteTaskHandler] Starting ContinueAfterTask for task: %s", task.TaskID.String())
 			if err := h.engineService.ContinueAfterTask(ctx, task); err != nil {
 				// 记录错误但不影响任务完成
 				log.Printf("[CompleteTaskHandler] ContinueAfterTask failed: %v", err)
 			}
 		}
+	} else {
+		log.Printf("[CompleteTaskHandler] WARNING: engineService is nil, cannot process workflow continuation")
 	}
 
 	return nil

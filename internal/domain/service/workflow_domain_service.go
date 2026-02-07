@@ -253,8 +253,9 @@ type PreviousTaskInfo struct {
 }
 
 // extractParallelGroupPrefix 从 taskKey 中提取并行组前缀
-// 如果 taskKey 是并行任务（格式：parentID_index），返回 parentID
+// 如果 taskKey 是并行任务（格式：parentID_index，其中 index 是 1-9），返回 parentID
 // 否则返回空字符串
+// 注意：并行任务的 index 必须是单个数字（1-9），以区别于普通任务的时间戳后缀
 func (s *WorkflowDomainService) extractParallelGroupPrefix(taskKey string) string {
 	if taskKey == "" {
 		return ""
@@ -266,7 +267,14 @@ func (s *WorkflowDomainService) extractParallelGroupPrefix(taskKey string) strin
 	}
 
 	potentialSuffix := taskKey[idx+1:]
-	if _, err := strconv.Atoi(potentialSuffix); err != nil {
+
+	// 并行任务的 index 必须是单个数字（1-9）
+	if len(potentialSuffix) != 1 {
+		return ""
+	}
+
+	index, err := strconv.Atoi(potentialSuffix)
+	if err != nil || index < 1 || index > 9 {
 		return ""
 	}
 

@@ -110,7 +110,7 @@ locker:
 # EventBus 配置 - Kafka (RedPanda)
 eventbus:
   type: kafka
-  serviceName: "evidence-command-service"  # 服务名称（必需，ASCII only）
+  serviceName: "process-management-service"  # 服务名称（必需，ASCII only）
 
   # Kafka 配置
   kafka:
@@ -119,7 +119,7 @@ eventbus:
     
     # Producer 配置
     producer:
-      clientId: "evidence-command-producer"  # ASCII only
+      clientId: "process-management-producer"  # ASCII only
       acks: "all"  # 等待所有副本确认
       compression: "snappy"  # 压缩算法
       maxMessageBytes: 1048576  # 1MB

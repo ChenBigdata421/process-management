@@ -15,11 +15,13 @@ import (
 	"github.com/ChenBigdata421/jxt-core/sdk"
 	"github.com/ChenBigdata421/jxt-core/sdk/config"
 	"github.com/ChenBigdata421/jxt-core/sdk/pkg"
+	"github.com/ChenBigdata421/jxt-core/sdk/pkg/eventbus"
 	logger "github.com/ChenBigdata421/jxt-core/sdk/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
 
 	ws "jxt-evidence-system/process-management/internal/domain/aggregate/task/websocket"
+	localoutbox "jxt-evidence-system/process-management/internal/infrastructure/outbox"
 	"jxt-evidence-system/process-management/shared/common/database"
 	"jxt-evidence-system/process-management/shared/common/di"
 	"jxt-evidence-system/process-management/shared/common/global"
@@ -83,7 +85,12 @@ func setup() {
 	logger.Setup()
 	database.ProcessDbSetup()
 
-	usageStr := `starting evidence management command api server...`
+	// ⭐ 初始化 EventBus（支持 NATS/Kafka 切换）
+	if err := setupEventBus(); err != nil {
+		log.Fatalf("Failed to setup EventBus: %v", err)
+	}
+
+	usageStr := `starting process management command api server...`
 	log.Println(usageStr)
 }
 
@@ -169,6 +176,13 @@ func run() error {
 	for _, f := range Registrations {
 		f()
 	}
+
+	// 启动outbox调度器
+	if err := startOutboxScheduler(); err != nil {
+		log.Printf("启动outbox调度器失败: %v", err)
+		return err
+	}
+
 	// 同时启动HTTP和gRPC服务
 	errChan := make(chan error, 2)
 	sigChan := make(chan os.Signal, 1)
@@ -337,9 +351,127 @@ func gracefulShutdown() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
+	// ⭐ 关闭 EventBus
+	eventBus := sdk.Runtime.GetEventBus()
+	if eventBus != nil {
+		if err := eventBus.Close(); err != nil {
+			log.Printf("EventBus Shutdown: %v\n", err)
+		}
+	}
+
 	// 关闭 Database
 	if err := database.Close(shutdownCtx); err != nil {
 		log.Printf("Error closing database: %v\n", err)
+	}
+
+	return nil
+}
+
+// setupEventBus 初始化 EventBus（支持 NATS/Kafka 切换）
+func setupEventBus() error {
+	// 从配置文件加载 EventBus 配置
+	eventBusConfig := config.AppConfig.EventBus
+	if eventBusConfig == nil {
+		logger.Warn("eventbus config not found in settings.yml, EventBus will not be initialized")
+		return nil
+	}
+
+	// 初始化全局 EventBus
+	if err := eventbus.InitializeFromConfig(eventBusConfig); err != nil {
+		return fmt.Errorf("failed to initialize EventBus: %w", err)
+	}
+
+	// 设置到 SDK Runtime
+	bus := eventbus.GetGlobal()
+	sdk.Runtime.SetEventBus(bus)
+
+	// ✅ Kafka 预订阅优化（避免 Consumer Group 重平衡）
+	if eventBusConfig.Type == "kafka" {
+		topics := []string{
+			// Evidence 自身的 Topics
+			"process.task.events",
+		}
+		//尝试将 bus 断言为具有 SetPreSubscriptionTopics 方法的接口
+		if kafkaBus, ok := bus.(interface{ SetPreSubscriptionTopics([]string) }); ok {
+			kafkaBus.SetPreSubscriptionTopics(topics)
+			logger.Info("✅ Kafka 预订阅 topic 已设置", "count", len(topics))
+		}
+	}
+
+	logger.Info("EventBus initialized successfully", "type", eventBusConfig.Type)
+
+	// ========== ✅ Topic 预创建优化 ==========
+	if err := preCreateTopics(bus); err != nil {
+		// 预创建失败不影响启动，只记录警告
+		logger.Warn("Topic pre-creation failed", "error", err)
+	}
+
+	logger.Info("EventBus initialized successfully", "type", eventBusConfig.Type)
+	return nil
+}
+
+// startOutboxScheduler 启动 jxt-core outbox 事件调度器
+// 根据多租户配置开关，创建单个（非多租户）或多个 Scheduler（每个租户一个）
+func startOutboxScheduler() error {
+	return di.Invoke(func(manager *localoutbox.OutboxSchedulerManager) {
+		if manager == nil {
+			log.Fatal("outbox scheduler manager is nil")
+		}
+
+		// 启动调度器管理器（会根据配置自动创建单个或多个 Scheduler）
+		ctx := context.Background()
+		if err := manager.Start(ctx); err != nil {
+			log.Fatalf("Failed to start outbox scheduler manager: %v", err)
+		}
+
+		logger.Infof("Outbox scheduler manager started with %d scheduler(s)", manager.GetSchedulerCount())
+	})
+}
+
+// preCreateTopics 预创建所有 Kafka Topics（可选，Kafka 支持自动创建）
+//
+// 优化原理：
+// - 在应用启动时预先创建所有 Topic
+// - 避免运行时自动创建导致的延迟
+// - 可以预设 Topic 配置（分区数、压缩算法等）
+//
+// 参考文档：docs/消息中间件切换到kafka/02-设计方案.md
+func preCreateTopics(bus eventbus.EventBus) error {
+	ctx := context.Background()
+
+	// 1. 定义所有需要使用的 Topic（与 TopicMapper 保持一致）
+	topics := []string{
+		// Evidence 自身的 Topics
+		"process.task.events", // Media 聚合事件
+	}
+
+	logger.Infof("🚀 开始预创建 %d 个 Kafka Topics...", len(topics))
+	startTime := time.Now()
+
+	// 2. 预创建所有 Topics
+	successCount := 0
+	for _, topic := range topics {
+		err := bus.ConfigureTopic(ctx, topic, eventbus.TopicOptions{
+			PersistenceMode: eventbus.TopicPersistent, // 持久化模式
+			RetentionTime:   168 * time.Hour,          // 7 天
+			MaxSize:         1073741824,               // 1GB
+			Partitions:      1,                        // 单分区保证顺序
+			Compression:     "snappy",                 // Snappy 压缩
+			Description:     fmt.Sprintf("Evidence management topic for %s", topic),
+		})
+		if err != nil {
+			logger.Warnf("⚠️  预创建 Topic 失败: %s - %v", topic, err)
+		} else {
+			logger.Infof("  ✅ Topic 预创建成功: %s", topic)
+			successCount++
+		}
+	}
+
+	elapsed := time.Since(startTime)
+	logger.Infof("✅ Topic 预创建完成！成功: %d/%d, 耗时: %v", successCount, len(topics), elapsed)
+
+	if successCount == 0 {
+		return fmt.Errorf("所有 Topic 预创建失败")
 	}
 
 	return nil

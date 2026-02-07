@@ -22,6 +22,7 @@ func init() {
 		registerInstanceRouter,
 		registerTaskRouter,
 		registerDownloadApprovalRouter,
+		registerDeleteApprovalRouter,
 	)
 	println("🔧 [DEBUG] dependencies.go init() 完成，routerNoCheckRole 数量:", len(routerNoCheckRole), "routerCheckRole 数量:", len(routerCheckRole))
 }
@@ -155,6 +156,27 @@ func registerDownloadApprovalRouter(v1 *gin.RouterGroup, authMiddleware *jwt.Gin
 				// 记录下载（审批通过后调用）
 				r.POST("/:mediaId/download-record", handler.RecordDownload)
 				r.POST("/batch", handler.BatchGetDownloadApprovalStatus)
+			}
+		} else {
+			logger.Fatal("DownloadApprovalHandler is nil after resolution")
+		}
+	})
+
+	if err != nil {
+		logger.Fatalf("Failed to resolve DownloadApprovalHandler: %v", err)
+	}
+}
+
+func registerDeleteApprovalRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddleware) {
+	// 通过依赖注入创建API处理器
+	err := di.Invoke(func(handler *api.DeleteApprovalHandler) {
+		if handler != nil {
+			r := v1.Group("/mediadelete").Use(authMiddleware.MiddlewareFunc()).Use(middleware.AuthCheckRole())
+			{
+				// 查询下载审批状态
+				r.GET("/:mediaId/delete-approval", handler.GetDeleteApprovalStatus)
+				// 提交下载审批申请
+				r.POST("/:mediaId/delete-approval", handler.SubmitDeleteApproval)
 			}
 		} else {
 			logger.Fatal("DownloadApprovalHandler is nil after resolution")

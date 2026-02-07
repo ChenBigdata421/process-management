@@ -33,6 +33,7 @@ func init() {
 		registerTaskApiDependencies,
 		registerWebSocketApiDependencies,
 		registerDownloadApprovalApiDependencies,
+		registerDeleteApprovalApiDependencies,
 	)
 }
 
@@ -46,6 +47,19 @@ func registerDownloadApprovalApiDependencies() {
 	})
 	if err != nil {
 		logger.Fatalf("Failed to provide DownloadApprovalHandler: %v", err)
+	}
+}
+
+func registerDeleteApprovalApiDependencies() {
+	err := di.Provide(func(
+		deleteApprovalService *service.DeleteApprovalService,
+		instanceService port.InstanceService,
+		workflowService port.WorkflowService,
+	) *DeleteApprovalHandler {
+		return NewDeleteApprovalHandler(deleteApprovalService, instanceService, workflowService)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to provide DeleteApprovalHandler: %v", err)
 	}
 }
 

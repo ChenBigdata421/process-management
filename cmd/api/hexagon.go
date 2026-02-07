@@ -3,6 +3,7 @@ package api
 import (
 	application "jxt-evidence-system/process-management/internal/application/service"
 	domain_service "jxt-evidence-system/process-management/internal/domain/service"
+	"jxt-evidence-system/process-management/internal/infrastructure/outbox"
 	persistence "jxt-evidence-system/process-management/internal/infrastructure/persistence/gorm"
 	infra_ws "jxt-evidence-system/process-management/internal/infrastructure/websocket"
 	"jxt-evidence-system/process-management/internal/interfaces/rest/api"
@@ -21,5 +22,6 @@ func init() {
 	Registrations = append(Registrations, domain_service.RegisterDependencies)
 	Registrations = append(Registrations, application.RegisterDependencies)
 	Registrations = append(Registrations, api.RegisterDependencies)
+	Registrations = append(Registrations, outbox.RegisterDependencies) // outbox依赖注册
 
 }

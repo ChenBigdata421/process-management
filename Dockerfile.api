@@ -15,9 +15,6 @@ WORKDIR /app
 COPY process-management/go.mod ./go.mod
 COPY process-management/go.sum ./go.sum
 
-# 复制 jxt-core 本地依赖（用于 replace 指令）
-COPY jxt-core /jxt-core
-
 # 清理和下载所有该模块所需的依赖
 RUN go mod tidy
 RUN go mod download all

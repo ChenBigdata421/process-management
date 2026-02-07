@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.11
 
 require (
-	github.com/ChenBigdata421/jxt-core v1.1.25
+	github.com/ChenBigdata421/jxt-core v1.1.26-0.20260207090439-abbe1a2a7681
 	github.com/alibaba/sentinel-golang v1.0.4
 	github.com/alibaba/sentinel-golang/pkg/adapters/gin v0.0.0-20250702131350-f7a7f9575711
 	github.com/bytedance/go-tagexpr/v2 v2.7.12
@@ -150,4 +150,3 @@ require (
 	gorm.io/plugin/dbresolver v1.3.0 // indirect
 )
 
-replace github.com/ChenBigdata421/jxt-core => ../jxt-core

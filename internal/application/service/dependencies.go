@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"jxt-evidence-system/process-management/internal/application/service/port"
+	delete_approval_repository "jxt-evidence-system/process-management/internal/domain/aggregate/delete_approval/repository"
 	download_approval_repository "jxt-evidence-system/process-management/internal/domain/aggregate/download_approval/repository"
 	instance_repository "jxt-evidence-system/process-management/internal/domain/aggregate/instance/repository"
 	task_repository "jxt-evidence-system/process-management/internal/domain/aggregate/task/repository"
@@ -11,6 +12,7 @@ import (
 	workflow_repository "jxt-evidence-system/process-management/internal/domain/aggregate/workflow/repository"
 	domain_service "jxt-evidence-system/process-management/internal/domain/service"
 	"jxt-evidence-system/process-management/shared/common/di"
+	event_repository "jxt-evidence-system/process-management/shared/domain/event/repository"
 
 	"github.com/ChenBigdata421/jxt-core/sdk/pkg/logger"
 )
@@ -38,6 +40,7 @@ func init() {
 		registerNotificationServiceDependencies,
 		registerWorkflowEngineServiceDependencies,
 		registerDownloadApprovalServiceDependencies,
+		registerDeleteApprovalServiceDependencies,
 	)
 }
 
@@ -49,6 +52,17 @@ func registerDownloadApprovalServiceDependencies() {
 	})
 	if err != nil {
 		logger.Fatalf("Failed to provide DownloadApprovalService: %v", err)
+	}
+}
+
+func registerDeleteApprovalServiceDependencies() {
+	err := di.Provide(func(
+		approvalRepo delete_approval_repository.MediaDeleteApprovalRepository,
+	) *DeleteApprovalService {
+		return NewDeleteApprovalService(approvalRepo)
+	})
+	if err != nil {
+		logger.Fatalf("Failed to provide DeleteApprovalService: %v", err)
 	}
 }
 
@@ -92,6 +106,7 @@ func registerInstanceServiceDependencies() {
 		taskService port.TaskService,
 		domainService *domain_service.WorkflowDomainService,
 		downloadApprovalSvc *DownloadApprovalService,
+		deleteApprovalSvc *DeleteApprovalService,
 	) port.InstanceService {
 		return &instanceService{
 			workflowService:     workflowService,
@@ -100,6 +115,7 @@ func registerInstanceServiceDependencies() {
 			taskService:         taskService,
 			domainService:       *domainService,
 			downloadApprovalSvc: downloadApprovalSvc,
+			deleteApprovalSvc:   deleteApprovalSvc,
 		}
 	})
 	if err != nil {
@@ -124,8 +140,10 @@ func registerWorkflowEngineServiceDependencies() {
 		domainService *domain_service.WorkflowDomainService,
 		notificationSvc port.NotificationService,
 		downloadApprovalSvc *DownloadApprovalService,
+		deleteApprovalSvc *DeleteApprovalService,
+		outboxRepo event_repository.OutboxRepository,
 	) port.WorkflowEngineService {
-		engineSvc := NewWorkflowEngineServiceWithNotification(workflowRepo, instanceRepo, taskRepo, *domainService, notificationSvc, downloadApprovalSvc)
+		engineSvc := NewWorkflowEngineServiceWithNotification(workflowRepo, instanceRepo, taskRepo, *domainService, notificationSvc, downloadApprovalSvc, deleteApprovalSvc, outboxRepo)
 		return engineSvc
 	})
 	if err != nil {

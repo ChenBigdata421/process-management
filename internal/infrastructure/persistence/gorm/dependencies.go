@@ -3,6 +3,7 @@ package persistence
 import (
 	"sync"
 
+	delete_approval_repository "jxt-evidence-system/process-management/internal/domain/aggregate/delete_approval/repository"
 	download_approval_repository "jxt-evidence-system/process-management/internal/domain/aggregate/download_approval/repository"
 	instance_repository "jxt-evidence-system/process-management/internal/domain/aggregate/instance/repository"
 	task_repository "jxt-evidence-system/process-management/internal/domain/aggregate/task/repository"
@@ -68,6 +69,14 @@ func registerDownloadApprovalRepoDependencies() {
 	}
 }
 
+func registerDeleteApprovalRepoDependencies() {
+	if err := di.Provide(func() delete_approval_repository.MediaDeleteApprovalRepository {
+		return &GormMediaDeleteApprovalRepository{}
+	}); err != nil {
+		logger.Fatalf("failed to provide MediaDeleteApprovalRepository: %v", err)
+	}
+}
+
 func init() {
 	registrations = append(registrations,
 		registerWorkflowInstanceRepoDependencies,
@@ -75,5 +84,6 @@ func init() {
 		registerTaskRepoDependencies,
 		registerTaskHistoryRepoDependencies,
 		registerDownloadApprovalRepoDependencies,
+		registerDeleteApprovalRepoDependencies,
 	)
 }
