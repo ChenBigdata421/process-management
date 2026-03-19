@@ -9,7 +9,6 @@ import (
 	instance_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/instance"
 	task_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/task"
 	workflow_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/workflow"
-	models "jxt-evidence-system/process-management/shared/common/models"
 
 	"gorm.io/gorm"
 )
@@ -25,7 +24,8 @@ import (
 这里的init函数用于设置数据库迁移的版本号。*/
 func init() {
 	_, fileName, _, _ := runtime.Caller(0)
-	migration.Migrate.SetVersion(migration.GetFilename(fileName), _1599190683659Tables)
+	// 添加 _process 后缀区分 process 服务的迁移版本
+	migration.Migrate.RegisterVersion(migration.GetFilename(fileName)+"_process", _1599190683659Tables)
 }
 
 func _1599190683659Tables(db *gorm.DB, version string) error {
@@ -50,9 +50,7 @@ func _1599190683659Tables(db *gorm.DB, version string) error {
 			return err
 		}
 		log.Println(`数据表初始化成功！！！ `)
-		// 3. 最后插入版本记录（确保前面的步骤都成功）
-		return tx.Create(&models.Migration{
-			Version: version,
-		}).Error
+		// 注意：Migration 记录由 jxt-core 框架自动创建，无需手动插入
+		return nil
 	})
 }

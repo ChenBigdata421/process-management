@@ -25,6 +25,7 @@ type TaskHandler struct {
 
 // CreateTask 创建任务
 func (h *TaskHandler) CreateTask(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -34,8 +35,6 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "参数验证失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	id, err := h.taskService.CreateTask(ctx, &cmd)
 	if err != nil {
 		h.Error(c, http.StatusInternalServerError, err, "创建任务失败")
@@ -47,6 +46,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 
 // GetPage 列出所有任务（支持筛选）
 func (h *TaskHandler) GetPage(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 	var query command.TaskPagedQuery
@@ -56,8 +56,6 @@ func (h *TaskHandler) GetPage(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	tasks, total, err := h.taskService.GetPage(ctx, &query)
 	if err != nil {
 		logger.Error("查询任务失败", "error", err)
@@ -70,6 +68,7 @@ func (h *TaskHandler) GetPage(c *gin.Context) {
 
 // GetTask 获取任务详情
 func (h *TaskHandler) GetTask(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -79,8 +78,6 @@ func (h *TaskHandler) GetTask(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	task, err := h.taskService.GetTaskByID(ctx, cmd.ID)
 	if err != nil {
 		logger.Error("获取任务失败", "error", err)
@@ -92,6 +89,7 @@ func (h *TaskHandler) GetTask(c *gin.Context) {
 }
 
 func (h *TaskHandler) GetRecentTask(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 	var cmd command.GetRecentTaskCommand
@@ -100,7 +98,6 @@ func (h *TaskHandler) GetRecentTask(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	task, err := h.taskService.GetRecentTask(ctx, cmd.ID)
 	if err != nil {
 		logger.Error("获取最近任务失败", "error", err)
@@ -113,6 +110,7 @@ func (h *TaskHandler) GetRecentTask(c *gin.Context) {
 
 // GetTodoTasks 查询待办任务
 func (h *TaskHandler) GetTodoTasks(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -130,8 +128,6 @@ func (h *TaskHandler) GetTodoTasks(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	tasks, total, err := h.taskService.GetTodoTasks(ctx, userID, &query)
 	if err != nil {
 		logger.Error("查询待办任务失败", "error", err)
@@ -144,6 +140,7 @@ func (h *TaskHandler) GetTodoTasks(c *gin.Context) {
 
 // GetDoneTasks 查询已办任务
 func (h *TaskHandler) GetDoneTasks(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -162,7 +159,6 @@ func (h *TaskHandler) GetDoneTasks(c *gin.Context) {
 		return
 	}
 
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	tasks, total, err := h.taskService.GetDoneTasks(ctx, userID, &query)
 	if err != nil {
 		logger.Error("查询已办任务失败", "error", err)
@@ -203,7 +199,6 @@ func (h *TaskHandler) CompleteTask(c *gin.Context) {
 	}
 	cmd.Result = result
 
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.taskService.CompleteTask(ctx, &cmd); err != nil {
 		logger.Error("完成任务失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "完成任务失败")
@@ -215,9 +210,6 @@ func (h *TaskHandler) CompleteTask(c *gin.Context) {
 
 // ApproveTask 批准任务
 func (h *TaskHandler) ApproveTask(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-	defer cancel()
-
 	userID := jwtuser.GetUserId(c)
 	if userID == 0 {
 		logger.Error("获取用户ID失败")
@@ -238,8 +230,14 @@ func (h *TaskHandler) ApproveTask(c *gin.Context) {
 	}
 	cmd.UserID = int(userID)
 	cmd.Result = status.TaskResultApproved
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
-	ctx = context.WithValue(ctx, global.UserIDKey, int(userID))
+
+	// 先设置UserID到context（基于c.Request.Context()，它已包含租户ID）
+	baseCtx := context.WithValue(c.Request.Context(), global.UserIDKey, int(userID))
+
+	// 再创建超时context（继承租户ID和UserID）
+	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
+	defer cancel()
+
 	if err := h.taskService.CompleteTask(ctx, &cmd); err != nil {
 		logger.Error("批准任务失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "批准任务失败")
@@ -251,9 +249,6 @@ func (h *TaskHandler) ApproveTask(c *gin.Context) {
 
 // RejectTask 驳回任务
 func (h *TaskHandler) RejectTask(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-	defer cancel()
-
 	userID := jwtuser.GetUserId(c)
 	if userID == 0 {
 		logger.Error("获取用户ID失败")
@@ -275,8 +270,13 @@ func (h *TaskHandler) RejectTask(c *gin.Context) {
 	cmd.UserID = int(userID)
 	cmd.Result = status.TaskResultRejected
 
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
-	ctx = context.WithValue(ctx, global.UserIDKey, int(userID))
+	// 先设置UserID到context（基于c.Request.Context()，它已包含租户ID）
+	baseCtx := context.WithValue(c.Request.Context(), global.UserIDKey, int(userID))
+
+	// 再创建超时context（继承租户ID和UserID）
+	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
+	defer cancel()
+
 	if err := h.taskService.CompleteTask(ctx, &cmd); err != nil {
 		logger.Error("驳回任务失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "驳回任务失败")
@@ -288,6 +288,7 @@ func (h *TaskHandler) RejectTask(c *gin.Context) {
 
 // DelegateTask 转办任务
 func (h *TaskHandler) DelegateTask(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -311,7 +312,6 @@ func (h *TaskHandler) DelegateTask(c *gin.Context) {
 	}
 	cmd.UserID = int(userID)
 
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.taskService.DelegateTask(ctx, &cmd); err != nil {
 		logger.Error("转办任务失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "转办任务失败")
@@ -322,6 +322,7 @@ func (h *TaskHandler) DelegateTask(c *gin.Context) {
 }
 
 func (h *TaskHandler) CancelTask(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -339,7 +340,6 @@ func (h *TaskHandler) CancelTask(c *gin.Context) {
 		return
 	}
 	cmd.UserID = int(userID)
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.taskService.CancelTask(ctx, &cmd); err != nil {
 		logger.Error("撤销任务失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "撤销任务失败")
@@ -351,6 +351,7 @@ func (h *TaskHandler) CancelTask(c *gin.Context) {
 
 // GetTaskHistory 获取任务历史
 func (h *TaskHandler) GetTaskHistory(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -360,7 +361,6 @@ func (h *TaskHandler) GetTaskHistory(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	histories, err := h.taskService.GetTaskHistory(ctx, cmd.ID)
 	if err != nil {
 		logger.Error("获取任务历史失败", "error", err)
@@ -373,6 +373,7 @@ func (h *TaskHandler) GetTaskHistory(c *gin.Context) {
 
 // GetInstanceTaskHistory 获取实例的任务历史
 func (h *TaskHandler) GetInstanceTaskHistory(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -388,7 +389,6 @@ func (h *TaskHandler) GetInstanceTaskHistory(c *gin.Context) {
 		return
 	}
 
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	histories, err := h.taskService.GetInstanceTaskHistory(ctx, cmd.ID)
 	if err != nil {
 		logger.Error("获取实例任务历史失败", "error", err)
@@ -401,6 +401,7 @@ func (h *TaskHandler) GetInstanceTaskHistory(c *gin.Context) {
 
 // GetInstanceTasks 获取实例的所有任务（包含当前状态）
 func (h *TaskHandler) GetTasksByInstanceID(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -410,8 +411,6 @@ func (h *TaskHandler) GetTasksByInstanceID(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*")
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	tasks, err := h.taskService.GetTasksByInstanceID(ctx, cmd.ID)
 	if err != nil {
 		logger.Error("获取实例任务失败", "error", err)
@@ -424,6 +423,7 @@ func (h *TaskHandler) GetTasksByInstanceID(c *gin.Context) {
 
 // DeleteTask 删除任务
 func (h *TaskHandler) DeleteTask(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
@@ -433,8 +433,6 @@ func (h *TaskHandler) DeleteTask(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.taskService.DeleteTask(ctx, &cmd); err != nil {
 		logger.Error("删除任务失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "删除任务失败")

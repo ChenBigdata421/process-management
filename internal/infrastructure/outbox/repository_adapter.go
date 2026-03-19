@@ -3,6 +3,7 @@ package outbox
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	jxtoutbox "github.com/ChenBigdata421/jxt-core/sdk/pkg/outbox"
 	gormadapter "github.com/ChenBigdata421/jxt-core/sdk/pkg/outbox/adapters/gorm"
@@ -52,14 +53,14 @@ func NewOutboxRepositoryAdapter(db *gorm.DB) event_repository.OutboxRepository {
 func convertEventToJxtOutboxEvent(event jxtevent.EnterpriseEvent) (*jxtoutbox.OutboxEvent, error) {
 	aggregateID := fmt.Sprintf("%v", event.GetAggregateID())
 
-	// ✅ 直接传入完整的 DomainEvent 对象
-	// jxt-core 会自动调用 jxtevent.MarshalDomainEvent() 进行序列化
+	// ✅ 直接传入完整的DomainEvent对象
+	// jxt-core会自动调用json.Marshal(event)进行序列化
 	jxtEvent, err := jxtoutbox.NewOutboxEvent(
 		event.GetTenantId(),
 		aggregateID,
 		event.GetAggregateType(),
 		event.GetEventType(),
-		event, // ✅ 传入完整的 DomainEvent 对象
+		event, // ✅ 完整的DomainEvent对象
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create jxt outbox event: %w", err)
@@ -78,7 +79,7 @@ func convertEventToJxtOutboxEvent(event jxtevent.EnterpriseEvent) (*jxtoutbox.Ou
 	}
 
 	// 生成幂等性键：{TenantID}:{AggregateType}:{AggregateID}:{EventType}:{EventID}
-	jxtEvent.IdempotencyKey = fmt.Sprintf("%s:%s:%s:%s:%s",
+	jxtEvent.IdempotencyKey = fmt.Sprintf("%d:%s:%s:%s:%s",
 		event.GetTenantId(),
 		event.GetAggregateType(),
 		aggregateID,
@@ -93,7 +94,7 @@ func convertEventToJxtOutboxEvent(event jxtevent.EnterpriseEvent) (*jxtoutbox.Ou
 func validateConsistency(jxtEvent *jxtoutbox.OutboxEvent, event jxtevent.EnterpriseEvent) error {
 	// 验证TenantID一致性
 	if jxtEvent.TenantID != event.GetTenantId() {
-		return fmt.Errorf("tenantID mismatch: envelope=%s, domainEvent=%s",
+		return fmt.Errorf("tenantID mismatch: envelope=%d, domainEvent=%d",
 			jxtEvent.TenantID, event.GetTenantId())
 	}
 
@@ -131,6 +132,18 @@ func convertJxtOutboxEventToEvent(jxtEvent *jxtoutbox.OutboxEvent) *event_reposi
 	return jxtEvent
 }
 
+// Save 保存事件（不带事务）
+func (a *OutboxRepositoryAdapter) Save(ctx context.Context, event jxtevent.EnterpriseEvent) error {
+	// 转换为 jxt-core OutboxEvent
+	jxtEvent, err := convertEventToJxtOutboxEvent(event)
+	if err != nil {
+		return err
+	}
+
+	// 使用 jxt-core 的 Save 方法
+	return a.jxtRepo.Save(ctx, jxtEvent)
+}
+
 // SaveInTx 在事务中保存事件
 func (a *OutboxRepositoryAdapter) SaveInTx(ctx context.Context, tx transaction.Transaction, event jxtevent.EnterpriseEvent) error {
 	// 转换为 jxt-core OutboxEvent
@@ -149,21 +162,9 @@ func (a *OutboxRepositoryAdapter) SaveInTx(ctx context.Context, tx transaction.T
 	return a.jxtRepo.SaveInTx(ctx, gormTx, jxtEvent)
 }
 
-// Save 保存事件到 outbox
-func (a *OutboxRepositoryAdapter) Save(ctx context.Context, event jxtevent.EnterpriseEvent) error {
-	// 转换为 jxt-core OutboxEvent
-	jxtEvent, err := convertEventToJxtOutboxEvent(event)
-	if err != nil {
-		return err
-	}
-
-	// 使用 jxt-core 的 Save
-	return a.jxtRepo.Save(ctx, jxtEvent)
-}
-
 // FindUnpublishedEvents 查找未发布的事件
 func (a *OutboxRepositoryAdapter) FindUnpublishedEvents(ctx context.Context, limit int) ([]*event_repository.OutboxEvent, error) {
-	jxtEvents, err := a.jxtRepo.FindPendingEvents(ctx, limit, "")
+	jxtEvents, err := a.jxtRepo.FindPendingEvents(ctx, limit, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +179,16 @@ func (a *OutboxRepositoryAdapter) FindUnpublishedEvents(ctx context.Context, lim
 
 // FindUnpublishedEventsByTenant 查找指定租户未发布的事件
 func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByTenant(ctx context.Context, tenantID string, limit int) ([]*event_repository.OutboxEvent, error) {
-	jxtEvents, err := a.jxtRepo.FindPendingEvents(ctx, limit, tenantID)
+	tenantIDInt := 0
+	if tenantID != "" {
+		var err error
+		tenantIDInt, err = strconv.Atoi(tenantID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tenantID: %w", err)
+		}
+	}
+
+	jxtEvents, err := a.jxtRepo.FindPendingEvents(ctx, limit, tenantIDInt)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +203,16 @@ func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByTenant(ctx context.Cont
 
 // FindUnpublishedEventsByTenantWithDelay 查找指定租户创建时间超过指定延迟的未发布事件
 func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByTenantWithDelay(ctx context.Context, tenantID string, delaySeconds int, limit int) ([]*event_repository.OutboxEvent, error) {
-	jxtEvents, err := a.jxtRepo.FindPendingEventsWithDelay(ctx, tenantID, delaySeconds, limit)
+	tenantIDInt := 0
+	if tenantID != "" {
+		var err error
+		tenantIDInt, err = strconv.Atoi(tenantID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tenantID: %w", err)
+		}
+	}
+
+	jxtEvents, err := a.jxtRepo.FindPendingEventsWithDelay(ctx, tenantIDInt, delaySeconds, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +242,7 @@ func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByAggregateType(ctx conte
 
 // FindUnpublishedEventsByAggregateID 根据聚合根ID查找未发布事件
 func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByAggregateID(ctx context.Context, aggregateID string) ([]*event_repository.OutboxEvent, error) {
-	jxtEvents, err := a.jxtRepo.FindByAggregateID(ctx, aggregateID, "")
+	jxtEvents, err := a.jxtRepo.FindByAggregateID(ctx, aggregateID, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +257,16 @@ func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByAggregateID(ctx context
 
 // FindUnpublishedEventsByTenantAndAggregateID 查找指定租户和聚合根ID的未发布事件
 func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByTenantAndAggregateID(ctx context.Context, tenantID string, aggregateID string) ([]*event_repository.OutboxEvent, error) {
-	jxtEvents, err := a.jxtRepo.FindByAggregateID(ctx, aggregateID, tenantID)
+	tenantIDInt := 0
+	if tenantID != "" {
+		var err error
+		tenantIDInt, err = strconv.Atoi(tenantID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tenantID: %w", err)
+		}
+	}
+
+	jxtEvents, err := a.jxtRepo.FindByAggregateID(ctx, aggregateID, tenantIDInt)
 	if err != nil {
 		return nil, err
 	}
@@ -268,13 +296,22 @@ func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByEventIDs(ctx context.Co
 
 // FindUnpublishedEventsByTenantAndEventIDs 查找指定租户和事件ID列表的未发布事件
 func (a *OutboxRepositoryAdapter) FindUnpublishedEventsByTenantAndEventIDs(ctx context.Context, tenantID string, eventIDs []string) ([]*event_repository.OutboxEvent, error) {
+	tenantIDInt := 0
+	if tenantID != "" {
+		var err error
+		tenantIDInt, err = strconv.Atoi(tenantID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tenantID: %w", err)
+		}
+	}
+
 	events := make([]*event_repository.OutboxEvent, 0, len(eventIDs))
 	for _, eventID := range eventIDs {
 		jxtEvent, err := a.jxtRepo.FindByID(ctx, eventID)
 		if err != nil {
 			continue // 跳过未找到的事件
 		}
-		if jxtEvent.TenantID == tenantID && jxtEvent.Status == jxtoutbox.EventStatusPending {
+		if jxtEvent.TenantID == tenantIDInt && jxtEvent.Status == jxtoutbox.EventStatusPending {
 			events = append(events, convertJxtOutboxEventToEvent(jxtEvent))
 		}
 	}
@@ -316,12 +353,20 @@ func (a *OutboxRepositoryAdapter) MarkAsMaxRetry(ctx context.Context, eventID st
 
 // CountUnpublishedEvents 统计未发布事件数量
 func (a *OutboxRepositoryAdapter) CountUnpublishedEvents(ctx context.Context) (int64, error) {
-	return a.jxtRepo.Count(ctx, jxtoutbox.EventStatusPending, "")
+	return a.jxtRepo.Count(ctx, jxtoutbox.EventStatusPending, 0)
 }
 
 // CountUnpublishedEventsByTenant 统计指定租户未发布事件数量
 func (a *OutboxRepositoryAdapter) CountUnpublishedEventsByTenant(ctx context.Context, tenantID string) (int64, error) {
-	return a.jxtRepo.Count(ctx, jxtoutbox.EventStatusPending, tenantID)
+	tenantIDInt := 0
+	if tenantID != "" {
+		var err error
+		tenantIDInt, err = strconv.Atoi(tenantID)
+		if err != nil {
+			return 0, fmt.Errorf("invalid tenantID: %w", err)
+		}
+	}
+	return a.jxtRepo.Count(ctx, jxtoutbox.EventStatusPending, tenantIDInt)
 }
 
 // FindByID 根据ID查找事件

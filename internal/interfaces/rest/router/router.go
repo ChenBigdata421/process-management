@@ -1,8 +1,6 @@
 package router
 
 import (
-	common "jxt-evidence-system/process-management/shared/common/middleware"
-
 	jwt "github.com/ChenBigdata421/jxt-core/sdk/pkg/jwtauth"
 	"github.com/gin-gonic/gin"
 )
@@ -42,7 +40,6 @@ func initRouter(r *gin.Engine, authMiddleware *jwt.GinJWTMiddleware) *gin.Engine
 func noCheckRoleRouter(r *gin.Engine) {
 	// 可根据业务需求来设置接口版本
 	v1 := r.Group("/api/v1")
-	v1.Use(common.TenantResolver)
 
 	println("🔧 [DEBUG] noCheckRoleRouter: routerNoCheckRole 中有", len(routerNoCheckRole), "个路由函数")
 	for i, f := range routerNoCheckRole {
@@ -56,7 +53,6 @@ func noCheckRoleRouter(r *gin.Engine) {
 func checkRoleRouter(r *gin.Engine, authMiddleware *jwt.GinJWTMiddleware) {
 	// 可根据业务需求来设置接口版本
 	v1 := r.Group("/api/v1")
-	v1.Use(common.TenantResolver)
 
 	for _, f := range routerCheckRole {
 		f(v1, authMiddleware)

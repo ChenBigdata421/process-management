@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package casbin;
+
+option go_package = ".;proto";
+
+// CasbinPolicyService 提供 Casbin 策略规则的 gRPC 查询服务
+service CasbinPolicyService {
+  // GetPolicies 获取指定租户的所有 Casbin 策略规则
+  rpc GetPolicies(GetPoliciesRequest) returns (GetPoliciesResponse) {}
+}
+
+// GetPoliciesRequest 查询策略请求
+message GetPoliciesRequest {
+  // 租户 ID（必填），遵循所有现有 gRPC 接口的约定：tenant_id 始终为第一个字段
+  int32 tenant_id = 1;
+}
+
+// GetPoliciesResponse 查询策略响应
+message GetPoliciesResponse {
+  repeated CasbinPolicyEntry policies = 1;  // 策略规则列表
+}
+
+// CasbinPolicyEntry 单条 Casbin 策略规则
+message CasbinPolicyEntry {
+  string p_type = 1;  // 策略类型: "p"(策略) 或 "g"(角色继承)
+  string v0 = 2;      // 通常为 sub (角色名)
+  string v1 = 3;      // 通常为 obj (资源路径)
+  string v2 = 4;      // 通常为 act (HTTP 方法)
+  string v3 = 5;      // 可选扩展字段
+  string v4 = 6;      // 可选扩展字段
+  string v5 = 7;      // 可选扩展字段
+}

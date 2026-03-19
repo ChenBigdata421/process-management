@@ -268,8 +268,40 @@ func (s *WorkflowEngineService) executeProcessTask(ctx context.Context, instance
 			time.Now(),
 		)
 
-		// 保存事件到 outbox（使用默认租户）
-		ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+		// 从context中提取租户ID并设置到事件（参考evidence-management的实现）
+		// ⚠️ 租户ID必须存在，否则记录错误并拒绝发布事件
+		tenantID := ctx.Value(global.TenantIDKey)
+		if tenantID == nil {
+			log.Printf("[EngineService] ❌ 租户ID不存在于context，拒绝发布删除事件，mediaId=%s", mediaID)
+			// 设置删除失败状态
+			outputData := map[string]interface{}{
+				"mediaName": mediaName,
+				"result":    "删除失败：缺少租户上下文",
+			}
+			outputBytes, _ := json.Marshal(outputData)
+			task.Output = outputBytes
+			if err := s.taskRepo.Save(ctx, task); err != nil {
+				return fmt.Errorf("failed to save task: %w", err)
+			}
+			return fmt.Errorf("租户ID不存在于context，无法发布删除事件")
+		}
+		tenantIDInt, ok := tenantID.(int)
+		if !ok || tenantIDInt <= 0 {
+			log.Printf("[EngineService] ❌ 租户ID非法（tenantID=%v），拒绝发布删除事件，mediaId=%s", tenantID, mediaID)
+			outputData := map[string]interface{}{
+				"mediaName": mediaName,
+				"result":    "删除失败：租户ID非法",
+			}
+			outputBytes, _ := json.Marshal(outputData)
+			task.Output = outputBytes
+			if err := s.taskRepo.Save(ctx, task); err != nil {
+				return fmt.Errorf("failed to save task: %w", err)
+			}
+			return fmt.Errorf("租户ID非法（tenantID=%v），无法发布删除事件", tenantID)
+		}
+		mediaDeletedEvent.SetTenantId(tenantIDInt)
+
+		// 保存事件到 outbox
 		if err := s.outboxRepo.Save(ctx, mediaDeletedEvent); err != nil {
 			log.Printf("[EngineService] Failed to save media deleted event: %v", err)
 			// 删除失败，写入 task.Output

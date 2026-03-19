@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"errors"
-	"jxt-evidence-system/process-management/shared/common/global"
 	"net/http"
 
 	"github.com/ChenBigdata421/jxt-core/sdk/pkg/logger"
+	tenantmiddleware "github.com/ChenBigdata421/jxt-core/sdk/pkg/tenant/middleware"
 
 	"github.com/casbin/casbin/v2/util"
 	"go.uber.org/zap"
@@ -20,12 +20,11 @@ import (
 func AuthCheckRole() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log := logger.GetRequestLogger(c)
-		// 从上下文中获取tenantID
-		ctx := c.Request.Context()
-		tenantID, ok := ctx.Value(global.TenantIDKey).(string)
-		if !ok {
-			log.Error("tenant id not exist")
-			response.Error(c, 500, errors.New("tenant id not exist"), "")
+		// 从 Gin context 中获取 tenantID（由 jxt-core ExtractTenantID 中间件设置）
+		tenantID := tenantmiddleware.GetTenantID(c)
+		if tenantID == 0 {
+			log.Error("tenant id not exist or invalid")
+			response.Error(c, 500, errors.New("tenant id not exist or invalid"), "")
 			return
 		}
 		data, _ := c.Get(jwtauth.JwtPayloadKey)

@@ -27,12 +27,15 @@ import (
 	"jxt-evidence-system/process-management/shared/common/global"
 	common "jxt-evidence-system/process-management/shared/common/middleware"
 	"jxt-evidence-system/process-management/shared/common/middleware/handler"
+	tenantdb "jxt-evidence-system/process-management/shared/common/tenantdb"
+	grpc_client "jxt-evidence-system/process-management/shared/infrastructure/grpc/client"
 )
 
 var (
-	configYml string
-	apiCheck  bool
-	StartCmd  = &cobra.Command{
+	configYml   string
+	apiCheck    bool
+	tenantCache *tenantdb.Cache
+	StartCmd    = &cobra.Command{
 		Use:          "server",
 		Short:        "Start API server",
 		Example:      "go-admin server -c config/settings.yml",
@@ -83,7 +86,36 @@ func setup() {
 
 	// 初始化基础组件
 	logger.Setup()
-	database.ProcessDbSetup()
+	// 新增：初始化租户数据库缓存（仅 process DB）
+	var err error
+	tenantCache, err = tenantdb.Setup("process-management")
+	if err != nil {
+		log.Printf("警告：租户缓存初始化失败: %v", err)
+	}
+
+	// 启动租户监听器（设置 Casbin 初始化回调）
+	if tenantCache != nil {
+		watcherConfig := tenantdb.DefaultWatcherConfig()
+		// 设置新租户 Casbin 初始化回调
+		if config.GrpcConfig.Client.Enabled {
+			watcherConfig.OnTenantAdded = func(tenantID int) error {
+				log.Printf("[Casbin] 动态租户 %d 开始初始化", tenantID)
+				if err := di.Invoke(func(provider *grpc_client.GrpcCasbinPolicyProvider) error {
+					return database.SetupTenantCasbin(provider, tenantID)
+				}); err != nil {
+					log.Printf("[Casbin] 动态租户 %d 初始化失败: %v", tenantID, err)
+					return err
+				}
+				log.Printf("[Casbin] 动态租户 %d 初始化成功", tenantID)
+				return nil
+			}
+		}
+
+		if err := tenantdb.StartWatcher(tenantCache, watcherConfig); err != nil {
+			log.Printf("警告：动态租户监听启动失败: %v", err)
+		}
+	}
+	database.ProcessDbSetup() // 初始化process数据库(存放流程信息)
 
 	// ⭐ 初始化 EventBus（支持 NATS/Kafka 切换）
 	if err := setupEventBus(); err != nil {
@@ -315,7 +347,7 @@ func initRouter() {
 	r.Use(common.Sentinel()).
 		Use(logger.SetRequestLogger) //jiyuanjie 创建基于基础zapLogger的requestLogger
 
-	common.InitMiddleware(r)
+	common.InitMiddleware(r, tenantCache)
 
 	// 注册健康检查端点（无需认证）
 	r.GET("/api/health", func(c *gin.Context) {

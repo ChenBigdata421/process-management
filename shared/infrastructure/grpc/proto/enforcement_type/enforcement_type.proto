@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package enforcement_type;
+
+option go_package = "jxt-evidence-system/evidence-management/shared/infrastructure/grpc/proto/enforcement_type;enforcement_type";
+
+// 执法类型信息服务
+service EnforcementTypeInfoService {
+  // 根据执法类型ID查询执法类型信息
+  rpc GetEnforcementTypeById(GetEnforcementTypeByIdReq) returns (EnforcementTypeInfoReply) {}
+  // 根据执法类型编码查询执法类型信息
+  rpc GetEnforcementTypeByCode(GetEnforcementTypeByCodeReq) returns (EnforcementTypeInfoReply) {}
+  // 根据执法类型名称查询执法类型信息
+  rpc GetEnforcementTypeByName(GetEnforcementTypeByNameReq) returns (EnforcementTypeInfoReply) {}
+}
+
+// 根据执法类型ID查询请求
+message GetEnforcementTypeByIdReq {
+  int32 tenant_id = 1;   // 租户ID，用于多租户系统
+  int64 id = 2;          // 执法类型唯一ID
+}
+
+// 根据执法类型编码查询请求
+message GetEnforcementTypeByCodeReq {
+  int32 tenant_id = 1;               // 租户ID，用于多租户系统
+  string enforcement_type_code = 2;  // 执法类型编码
+}
+
+// 根据执法类型名称查询请求
+message GetEnforcementTypeByNameReq {
+  int32 tenant_id = 1;               // 租户ID，用于多租户系统
+  string enforcement_type_name = 2;  // 执法类型名称
+}
+
+// 执法类型信息响应，字段与领域模型SysEnforcementType对应
+message EnforcementTypeInfoReply {
+  int64 id = 1;                           // 执法类型ID
+  string enforcement_type_code = 2;       // 执法类型编码
+  string enforcement_type_name = 3;       // 执法类型名称
+  string enforcement_type_desc = 4;       // 执法类型描述
+  string enforcement_type_path = 5;       // 执法类型路径
+  int64 parent_id = 6;                    // 父级ID
+  string source = 7;                      // 来源
+  int32 sort = 8;                         // 排序
+  string created_at = 9;                  // 创建时间
+  string updated_at = 10;                 // 更新时间
+}

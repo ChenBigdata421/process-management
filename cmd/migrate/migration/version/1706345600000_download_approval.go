@@ -7,7 +7,6 @@ import (
 	"jxt-evidence-system/process-management/cmd/migrate/migration"
 	delete_approval "jxt-evidence-system/process-management/internal/domain/aggregate/delete_approval"
 	download_approval "jxt-evidence-system/process-management/internal/domain/aggregate/download_approval"
-	models "jxt-evidence-system/process-management/shared/common/models"
 
 	gormadapter "github.com/ChenBigdata421/jxt-core/sdk/pkg/outbox/adapters/gorm"
 	"gorm.io/gorm"
@@ -15,7 +14,8 @@ import (
 
 func init() {
 	_, fileName, _, _ := runtime.Caller(0)
-	migration.Migrate.SetVersion(migration.GetFilename(fileName), _1706345600000DownloadApproval)
+	// 添加 _process 后缀区分 Process 服务的迁移版本
+	migration.Migrate.RegisterVersion(migration.GetFilename(fileName)+"_process", _1706345600000DownloadApproval)
 }
 
 func _1706345600000DownloadApproval(db *gorm.DB, version string) error {
@@ -34,9 +34,7 @@ func _1706345600000DownloadApproval(db *gorm.DB, version string) error {
 		}
 		log.Println(`媒体下载审批表创建成功！`)
 
-		// 插入版本记录
-		return tx.Create(&models.Migration{
-			Version: version,
-		}).Error
+		// 注意：Migration 记录由 jxt-core 框架自动创建，无需手动插入
+		return nil
 	})
 }

@@ -40,7 +40,8 @@ var _ = BeforeSuite(func() {
 
 	// 初始化数据库连接
 	var err error
-	dsn := "postgres://root:123456@localhost:5436/processdb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai"
+	// 使用正确的数据库配置 (来自 docker-compose.yml)
+	dsn := "postgres://tenant_1_process-management:123456@localhost:5436/tenant_default_process?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai"
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		Fail("无法连接到数据库: " + err.Error())

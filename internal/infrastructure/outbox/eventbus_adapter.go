@@ -14,13 +14,7 @@ func NewEventBusAdapter() outbox.EventPublisher {
 	// 从 SDK Runtime 获取全局 EventBus 实例（NATS JetStream）
 	eventBus := sdk.Runtime.GetEventBus()
 
-	// 如果 EventBus 未初始化，返回 nil
-	// 这种情况下，Outbox 功能将不可用，但不会导致应用崩溃
-	if eventBus == nil {
-		return nil
-	}
-
-	// 使用 jxt-core 提供的适配器
+	// 使用 jxt-core 提供的适配器 ⭐
 	// 该适配器会自动：
 	// 1. 转换 Outbox Envelope 为 EventBus Envelope
 	// 2. 转换 EventBus PublishResult 为 Outbox PublishResult

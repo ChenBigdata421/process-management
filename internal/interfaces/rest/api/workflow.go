@@ -9,9 +9,8 @@ import (
 	"jxt-evidence-system/process-management/internal/application/service/port"
 	instance_aggregate "jxt-evidence-system/process-management/internal/domain/aggregate/instance"
 	"jxt-evidence-system/process-management/internal/domain/aggregate/instance/repository"
-	"jxt-evidence-system/process-management/shared/common/global"
+	sharederrors "jxt-evidence-system/process-management/shared/common/errors"
 	"jxt-evidence-system/process-management/shared/common/status"
-
 	"jxt-evidence-system/process-management/shared/common/restapi"
 
 	"github.com/ChenBigdata421/jxt-core/sdk/pkg/jwtauth/user"
@@ -30,6 +29,7 @@ type WorkflowHandler struct {
 
 // CreateWorkflow 创建工作流
 func (h *WorkflowHandler) CreateWorkflow(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 	cmd := command.CreateWorkflowCommand{}
@@ -38,8 +38,6 @@ func (h *WorkflowHandler) CreateWorkflow(c *gin.Context) {
 		return
 	}
 	cmd.SetCreateBy(user.GetUserId(c))
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	id, err := h.workflowService.CreateWorkflow(ctx, &cmd)
 	if err != nil {
 		h.Error(c, http.StatusInternalServerError, err, "创建工作流失败")
@@ -50,6 +48,7 @@ func (h *WorkflowHandler) CreateWorkflow(c *gin.Context) {
 
 // GetWorkflow 获取工作流
 func (h *WorkflowHandler) GetWorkflow(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 	cmd := command.GetWorkflowByIDCommand{}
@@ -57,11 +56,13 @@ func (h *WorkflowHandler) GetWorkflow(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	workflow, err := h.workflowService.GetWorkflowByID(ctx, cmd.ID)
 	if err != nil {
-		h.Error(c, http.StatusInternalServerError, err, "获取工作流失败")
+		if err == sharederrors.ErrWorkflowNotFound {
+			h.Error(c, http.StatusNotFound, err, "工作流不存在")
+		} else {
+			h.Error(c, http.StatusInternalServerError, err, "获取工作流失败")
+		}
 		return
 	}
 
@@ -70,6 +71,7 @@ func (h *WorkflowHandler) GetWorkflow(c *gin.Context) {
 
 // GetWorkflow 获取工作流
 func (h *WorkflowHandler) GetWorkflowByName(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 	cmd := command.GetWorkflowByNameCommand{}
@@ -77,8 +79,6 @@ func (h *WorkflowHandler) GetWorkflowByName(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	workflow, err := h.workflowService.GetWorkflowByName(ctx, cmd.Name)
 	if err != nil {
 		h.Error(c, http.StatusInternalServerError, err, "获取工作流失败")
@@ -90,6 +90,7 @@ func (h *WorkflowHandler) GetWorkflowByName(c *gin.Context) {
 
 // GetPage 列出所有工作流（支持筛选）
 func (h *WorkflowHandler) GetPage(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 	var query command.WorkflowPagedQuery
@@ -99,10 +100,9 @@ func (h *WorkflowHandler) GetPage(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	workflows, total, err := h.workflowService.GetPage(ctx, &query)
 	if err != nil {
+		h.GetLogger(c).Error(err.Error())
 		h.Error(c, http.StatusInternalServerError, err, "查询工作流失败")
 		return
 	}
@@ -111,11 +111,10 @@ func (h *WorkflowHandler) GetPage(c *gin.Context) {
 }
 
 func (h *WorkflowHandler) GetAllWorkflow(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	workflows, err := h.workflowService.GetAllWorkflow(ctx)
 	if err != nil {
 		h.Error(c, http.StatusInternalServerError, err, "查询工作流失败")
@@ -127,6 +126,7 @@ func (h *WorkflowHandler) GetAllWorkflow(c *gin.Context) {
 
 // UpdateWorkflow 更新工作流
 func (h *WorkflowHandler) UpdateWorkflow(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
@@ -144,8 +144,6 @@ func (h *WorkflowHandler) UpdateWorkflow(c *gin.Context) {
 	}
 
 	cmd.SetUpdateBy(user.GetUserId(c))
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.workflowService.UpdateWorkflow(ctx, &cmd); err != nil {
 		h.Error(c, http.StatusInternalServerError, err, "更新工作流失败")
 		return
@@ -156,6 +154,7 @@ func (h *WorkflowHandler) UpdateWorkflow(c *gin.Context) {
 
 // DeleteWorkflow 删除工作流
 func (h *WorkflowHandler) DeleteWorkflow(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
@@ -166,8 +165,6 @@ func (h *WorkflowHandler) DeleteWorkflow(c *gin.Context) {
 		return
 	}
 
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.workflowService.DeleteWorkflow(ctx, &cmd); err != nil {
 		logger.Error("删除工作流失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "删除工作流失败")
@@ -179,6 +176,7 @@ func (h *WorkflowHandler) DeleteWorkflow(c *gin.Context) {
 
 // ActivateWorkflow 激活工作流
 func (h *WorkflowHandler) ActivateWorkflow(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -190,8 +188,6 @@ func (h *WorkflowHandler) ActivateWorkflow(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.workflowService.ActivateWorkflow(ctx, cmd); err != nil {
 		h.Error(c, 500, err, "激活工作流失败")
 		return
@@ -202,6 +198,7 @@ func (h *WorkflowHandler) ActivateWorkflow(c *gin.Context) {
 
 // FreezeWorkflow 冻结工作流
 func (h *WorkflowHandler) FreezeWorkflow(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -213,8 +210,6 @@ func (h *WorkflowHandler) FreezeWorkflow(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.workflowService.FreezeWorkflow(ctx, cmd); err != nil {
 		log.Error(err.Error())
 		h.Error(c, http.StatusInternalServerError, err, "冻结工作流失败")
@@ -226,6 +221,7 @@ func (h *WorkflowHandler) FreezeWorkflow(c *gin.Context) {
 
 // CheckCanFreeze 检查工作流是否可以冻结
 func (h *WorkflowHandler) CheckCanFreeze(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -235,8 +231,6 @@ func (h *WorkflowHandler) CheckCanFreeze(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 
 	// 1. 先调用 CountInstanceByWorkflow 统计总实例数
 	totalCount, err := h.instanceService.CountInstanceByWorkflow(ctx, cmd.ID)

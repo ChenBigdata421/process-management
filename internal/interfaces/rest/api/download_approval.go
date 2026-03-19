@@ -42,6 +42,7 @@ func NewDownloadApprovalHandler(
 // GetDownloadApprovalStatus 获取下载审批状态
 // GET /api/v1/media/:mediaId/download-approval
 func (h *DownloadApprovalHandler) GetDownloadApprovalStatus(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
@@ -58,9 +59,6 @@ func (h *DownloadApprovalHandler) GetDownloadApprovalStatus(c *gin.Context) {
 		return
 	}
 
-	// 设置租户ID
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
-
 	// 查询审批状态
 	status, err := h.downloadApprovalService.GetApprovalStatus(ctx, cmd.MediaID, userID)
 	if err != nil {
@@ -75,9 +73,6 @@ func (h *DownloadApprovalHandler) GetDownloadApprovalStatus(c *gin.Context) {
 // SubmitDownloadApproval 提交下载审批申请
 // POST /api/v1/media/:mediaId/download-approval
 func (h *DownloadApprovalHandler) SubmitDownloadApproval(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
-	defer cancel()
-
 	var cmd command.SubmitDownloadApprovalCommand
 	if err := c.ShouldBindUri(&cmd); err != nil {
 		h.GetLogger(c).Error("bind SubmitDownloadApprovalCommand err", zap.Error(err))
@@ -97,9 +92,12 @@ func (h *DownloadApprovalHandler) SubmitDownloadApproval(c *gin.Context) {
 		return
 	}
 
-	// 设置租户ID和用户ID
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
-	ctx = context.WithValue(ctx, global.UserIDKey, int(userID))
+	// 先设置UserID到context（基于c.Request.Context()，它已包含租户ID）
+	baseCtx := context.WithValue(c.Request.Context(), global.UserIDKey, int(userID))
+
+	// 再创建超时context（继承租户ID和UserID）
+	ctx, cancel := context.WithTimeout(baseCtx, 10*time.Second)
+	defer cancel()
 
 	// 提交审批申请
 	_, err := h.downloadApprovalService.SubmitApproval(ctx, userID, &cmd)
@@ -115,6 +113,7 @@ func (h *DownloadApprovalHandler) SubmitDownloadApproval(c *gin.Context) {
 // BatchGetDownloadApprovalStatus 批量查询下载审批状态
 // POST /api/v1/media/download-approval/batch
 func (h *DownloadApprovalHandler) BatchGetDownloadApprovalStatus(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
@@ -137,9 +136,6 @@ func (h *DownloadApprovalHandler) BatchGetDownloadApprovalStatus(c *gin.Context)
 		return
 	}
 
-	// 设置租户ID
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
-
 	// 批量查询
 	results, err := h.downloadApprovalService.BatchGetApprovalStatus(ctx, cmd.MediaIDs, userID)
 	if err != nil {
@@ -154,6 +150,7 @@ func (h *DownloadApprovalHandler) BatchGetDownloadApprovalStatus(c *gin.Context)
 // RecordDownload 记录下载（审批通过后调用）
 // POST /api/v1/media/:mediaId/download-record
 func (h *DownloadApprovalHandler) RecordDownload(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
@@ -169,9 +166,6 @@ func (h *DownloadApprovalHandler) RecordDownload(c *gin.Context) {
 		h.Error(c, http.StatusUnauthorized, nil, "未授权")
 		return
 	}
-
-	// 设置租户ID
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 
 	// 记录下载
 	if err := h.downloadApprovalService.RecordDownload(ctx, cmd.MediaID, userID); err != nil {

@@ -7,6 +7,7 @@ import (
 
 	"jxt-evidence-system/process-management/internal/application/command"
 	"jxt-evidence-system/process-management/internal/application/service/port"
+	sharederrors "jxt-evidence-system/process-management/shared/common/errors"
 	"jxt-evidence-system/process-management/shared/common/global"
 	"jxt-evidence-system/process-management/shared/common/restapi"
 
@@ -23,6 +24,7 @@ type InstanceHandler struct {
 
 // CancelInstance 取消工作流实例（将状态标记为取消）
 func (h *InstanceHandler) CancelInstance(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
@@ -33,7 +35,6 @@ func (h *InstanceHandler) CancelInstance(c *gin.Context) {
 		return
 	}
 
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.instanceService.CancelInstance(ctx, &cmd); err != nil {
 		logger.Error("取消工作流实例失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "取消工作流实例失败")
@@ -45,21 +46,31 @@ func (h *InstanceHandler) CancelInstance(c *gin.Context) {
 
 // StartInstance 启动工作流实例
 func (h *InstanceHandler) StartInstance(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-	defer cancel()
-
 	cmd := command.StartWorkflowInstanceCommand{}
 	if err := c.ShouldBindJSON(&cmd); err != nil {
 		h.Error(c, http.StatusBadRequest, err, "")
 		return
 	}
+
+	// 先设置UserID到context（基于c.Request.Context()，它已包含租户ID）
 	userID := jwtuser.GetUserId(c)
-	ctx = context.WithValue(ctx, global.UserIDKey, int(userID))
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
+	baseCtx := context.WithValue(c.Request.Context(), global.UserIDKey, int(userID))
+
+	// 再创建超时context（继承租户ID和UserID）
+	ctx, cancel := context.WithTimeout(baseCtx, 2*time.Second)
+	defer cancel()
+
 	id, err := h.instanceService.StartWorkflowInstance(ctx, &cmd)
 	if err != nil {
-		h.Error(c, http.StatusInternalServerError, err, "启动工作流实例失败")
+		// 根据错误类型判断返回的 HTTP 状态码
+		switch err {
+		case sharederrors.ErrWorkflowNotFound,
+			 sharederrors.ErrInvalidStatusTransition,
+			 sharederrors.ErrInvalidWorkflowDefinition:
+			h.Error(c, http.StatusBadRequest, err, "启动工作流实例失败")
+		default:
+			h.Error(c, http.StatusInternalServerError, err, "启动工作流实例失败")
+		}
 		return
 	}
 
@@ -68,6 +79,7 @@ func (h *InstanceHandler) StartInstance(c *gin.Context) {
 
 // GetInstance 获取工作流实例
 func (h *InstanceHandler) GetInstance(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
@@ -77,8 +89,6 @@ func (h *InstanceHandler) GetInstance(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	dto, err := h.instanceService.GetInstanceByID(ctx, cmd.ID)
 	if err != nil {
 		h.Error(c, http.StatusInternalServerError, err, "获取工作流实例失败")
@@ -88,6 +98,7 @@ func (h *InstanceHandler) GetInstance(c *gin.Context) {
 }
 
 func (h *InstanceHandler) GetInstanceDetail(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
@@ -97,8 +108,6 @@ func (h *InstanceHandler) GetInstanceDetail(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	dto, err := h.instanceService.GetInstanceDetailByID(ctx, cmd.ID)
 	if err != nil {
 		h.Error(c, http.StatusInternalServerError, err, "获取工作流实例详情失败")
@@ -109,6 +118,7 @@ func (h *InstanceHandler) GetInstanceDetail(c *gin.Context) {
 
 // ListInstances 列出工作流实例
 func (h *InstanceHandler) GetInstancesByWorkflow(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 
@@ -118,8 +128,6 @@ func (h *InstanceHandler) GetInstancesByWorkflow(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数错误")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	instances, total, err := h.instanceService.GetInstancesByWorkflow(ctx, &query)
 	if err != nil {
 
@@ -132,6 +140,7 @@ func (h *InstanceHandler) GetInstancesByWorkflow(c *gin.Context) {
 
 // GetPage 列出所有工作流实例（支持筛选）
 func (h *InstanceHandler) GetPage(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
 	var query command.InstancePagedQuery
@@ -141,8 +150,6 @@ func (h *InstanceHandler) GetPage(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, err, "请求参数绑定失败")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	instances, total, err := h.instanceService.GetPage(ctx, &query)
 	if err != nil {
 		h.Error(c, http.StatusInternalServerError, err, "查询工作流实例失败")
@@ -154,6 +161,7 @@ func (h *InstanceHandler) GetPage(c *gin.Context) {
 
 // DeleteInstance 删除工作流实例
 func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
+	// c.Request.Context() 已被租户中间件设置了租户ID，直接使用即可
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
@@ -168,8 +176,6 @@ func (h *InstanceHandler) DeleteInstance(c *gin.Context) {
 		h.Error(c, http.StatusBadRequest, nil, "请求参数错误")
 		return
 	}
-	// 设置租户ID（单租户模式使用默认租户 "*"）
-	ctx = context.WithValue(ctx, global.TenantIDKey, "*")
 	if err := h.instanceService.DeleteInstance(ctx, &cmd); err != nil {
 		logger.Error("删除工作流实例失败", "error", err)
 		h.Error(c, http.StatusInternalServerError, err, "删除工作流实例失败")

@@ -50,36 +50,6 @@ jwt:
   # 过期前多长时间开始更换token 单位：秒
   replaceTime: 30
 
-database:
-  masterDB: # 存放用户信息，角色信息，权限信息
-    driver: postgres # 数据库类型 mysql, sqlite3, postgres, sqlserver
-    source: postgres://root:123456@postgres-security:5432/securitydb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
-    connMaxIdleTime: 60    # 连接最大空闲时间(秒)
-    connMaxLifeTime: 3600  # 连接最大生存时间(秒)
-    maxIdleConns: 10       # 最大空闲连接数
-    maxOpenConns: 100      # 最大打开连接数
-  commandDB: # 存放evidence信息
-    driver: mysql
-    source: root:123456@tcp(mysql-evidence-command:3306)/evidence_command_db?charset=utf8&parseTime=True&loc=Local
-    connMaxIdleTime: 60    # 连接最大空闲时间(秒)
-    connMaxLifeTime: 3600  # 连接最大生存时间(秒)
-    maxIdleConns: 10       # 最大空闲连接数
-    maxOpenConns: 100      # 最大打开连接数
-  queryDB:  # 存放evidence查询信息
-    driver: postgres
-    source: postgres://root:123456@postgres-evidence-query:5432/evidencedb_query_db?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
-    connMaxIdleTime: 60    # 连接最大空闲时间(秒)
-    connMaxLifeTime: 3600  # 连接最大生存时间(秒)
-    maxIdleConns: 10       # 最大空闲连接数
-    maxOpenConns: 100      # 最大打开连接数
-  processDB:  # 存放evidence查询信息
-    driver: postgres
-    source: postgres://root:123456@postgres-process:5432/processdb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
-    connMaxIdleTime: 60    # 连接最大空闲时间(秒)
-    connMaxLifeTime: 3600  # 连接最大生存时间(秒)
-    maxIdleConns: 10       # 最大空闲连接数
-    maxOpenConns: 100      # 最大打开连接数
-  
 cache:
 #    redis:
 #      addr: 127.0.0.1:6379
@@ -217,63 +187,6 @@ grpc:
       trace: true                        # 链路跟踪
       prometheus: true                   # Prometheus监控
       breaker: true                      # 熔断器
-
-# 多租户配置部分  
-tenants:  
-  # 是否启用多租户模式 - 关键开关  
-  # false: 使用上面的主数据库配置 (单租户模式)  
-  # true: 使用下面的租户配置 (多租户模式)  
-  enabled: false  
-  
-  # 租户识别配置  
-  resolver:  
-    type: "host"  # 可选: host, path, header, query  
-    headerName: "X-Tenant-ID"  # 当type为header时使用  
-    queryParam: "tenant"  # 当type为query时使用  
-    pathIndex: 0  # 当type为path时使用  
-  
-  # 默认租户配置 - 继承并可覆盖主数据库配置  
-  defaults:  
-    database:  
-      # 这里只需定义与主配置不同的值  
-      maxOpenConns: 5  # 覆盖主配置中的10   
-  
-  # 租户列表 - 仅在tenants.enabled=true时使用  
-  list:  
-    # 第一个租户 - 可视为主租户或默认租户  
-    - id: "tenant_primary"  
-      name: "Primary Organization"  
-      active: true  
-      hosts: ["app.example.com", "www.example.com"]  
-      database:  
-        # 只需指定与defaults不同的配置  
-        source: "user:password@tcp(db.example.com:3306)/primary_db"  
-    
-    # 第二个租户  
-    - id: "tenant_secondary"  
-      name: "Secondary Business Unit"  
-      active: true  
-      hosts: ["secondary.example.com"]  
-      database:  
-        source: "user:password@tcp(db.example.com:3306)/secondary_db"  
-        maxOpenConns: 15  # 覆盖默认租户配置  
-    
-    # 第三个租户 - 使用不同的数据库类型  
-    - id: "tenant_special"  
-      name: "Special Division"  
-      active: true  
-      hosts: ["special.example.com"]  
-      database:  
-        driver: "postgres"  # 不同的数据库类型  
-        source: "postgres://user:password@db.example.com:5432/special_db"  
-    
-    # 未激活的租户  
-    - id: "tenant_inactive"  
-      name: "Inactive Customer"  
-      active: false  # 禁用此租户  
-      hosts: ["inactive.example.com"]  
-      database:  
-        source: "user:password@tcp(db.example.com:3306)/inactive_db"
 
 # 外部服务集成配置  
 integrations:  

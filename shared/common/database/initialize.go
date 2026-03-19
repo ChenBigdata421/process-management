@@ -1,334 +1,144 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"reflect"
-	"strings"
+	"sync"
 	"time"
 
-	"jxt-evidence-system/process-management/cmd/migrate/migration"
-	"jxt-evidence-system/process-management/shared/common/global"
-	"jxt-evidence-system/process-management/shared/common/models"
+	tenantdb "jxt-evidence-system/process-management/shared/common/tenantdb"
 
 	"github.com/ChenBigdata421/jxt-core/sdk"
-	toolsConfig "github.com/ChenBigdata421/jxt-core/sdk/config"
-	"github.com/ChenBigdata421/jxt-core/sdk/pkg"
-	mylogger "github.com/ChenBigdata421/jxt-core/sdk/pkg/logger"
-	toolsDB "github.com/ChenBigdata421/jxt-core/tools/database"
-	"gorm.io/gorm"
-	"gorm.io/gorm/schema"
+	mycasbin "github.com/ChenBigdata421/jxt-core/sdk/pkg/casbin"
 )
 
-// 数据库连接重试配置
-const (
-	maxRetries     = 10               // 最大重试次数
-	initialBackoff = 1 * time.Second  // 初始退避时间
-	maxBackoff     = 30 * time.Second // 最大退避时间
-)
-
-// connectWithRetry 带重试机制的数据库连接函数
-func connectWithRetry(
-	dbName string,
-	driverStr string,
-	resolverConfig toolsDB.Configure,
-	gormConfig *gorm.Config,
-) (*gorm.DB, error) {
-	var db *gorm.DB
-	var err error
-	backoff := initialBackoff
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		db, err = resolverConfig.Init(gormConfig, opens[driverStr])
-		if err == nil {
-			if attempt > 1 {
-				log.Printf(pkg.Green("[%s] 数据库连接成功 (重试 %d 次后)\n"), dbName, attempt-1)
-			}
-			return db, nil
-		}
-
-		if attempt < maxRetries {
-			log.Printf(pkg.Yellow("[%s] 数据库连接失败 (尝试 %d/%d): %v, %v 后重试...\n"),
-				dbName, attempt, maxRetries, err, backoff)
-			time.Sleep(backoff)
-			// 指数退避，但不超过最大值
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("[%s] 数据库连接失败，已重试 %d 次: %w", dbName, maxRetries, err)
-}
-
+// Setup 配置命令数据库,支持多数据库连接,k可以理解成租户id
 func ProcessDbSetup() {
-	// 如果未配置多租户，只初始化默认数据库，唯一的tenantID设置为"*"
-	if !toolsConfig.TenantsConfig.Enabled { //如果多租户为false，直接从config.Database获取
-		setupProcessDatabase("*", toolsConfig.DatabaseConfig)
+	// 优先从租户缓存获取配置
+	tenantCache := tenantdb.GetGlobalCache()
+	if tenantCache != nil {
+		// 使用 ETCD 租户缓存模式
+		log.Println("[database] 使用租户缓存初始化 Command 数据库")
+
+		// 获取迁移函数
+		migrationFn := getProcessMigrationFunc()
+
+		stats, err := tenantdb.InitializeAll(tenantCache, migrationFn)
+		if err != nil {
+			log.Fatalf("[database] 租户数据库初始化失败: %v", err)
+		}
+		log.Printf("[database] Command 数据库初始化完成: 成功=%d, 失败=%d", stats.Success, stats.Failed)
 		return
 	}
 
-	// 如果多租户为true，则初始化每个租户的数据库
-	for k := range toolsConfig.TenantsConfig.List {
-		setupProcessDatabase(toolsConfig.TenantsConfig.List[k].ID, &toolsConfig.TenantsConfig.List[k].Database)
-	}
+	// 降级：使用静态配置
+	// 注意：最新架构要求必须与 ETCD 保持一致，不再支持降级到静态配置
+	log.Fatalf("[database] 错误：租户缓存未初始化，请确保 ETCD 可用")
 }
 
-/*
-dbresolver 插件为 GORM 提供了数据库读写分离和分片的功能支持。通过配置该插件，
-开发者可以轻松地实现数据库的读写分离和分片策略
-*/
-func setupProcessDatabase(tenantID string, c *toolsConfig.Database) {
-	// 获取配置的优先级逻辑：
-	// 1. 如果多租户为false，直接从config.Database获取
-	// 2. 如果多租户为true：
-	//    a. 先从Tenants.list[tenantID].Database获取
-	//    b. 如果没有，再从Tenants.Defaults.Database获取
-	//    c. 如果还没有，最后从config.Database获取
-	getConfig := func(field string, required bool) interface{} {
-		var result interface{}
+// ============================================
+// Casbin 策略初始化函数（gRPC 模式）
+// ============================================
 
-		// 如果多租户为false，直接从config.Database获取
-		if !toolsConfig.TenantsConfig.Enabled {
-			result = getFieldValue(toolsConfig.DatabaseConfig, field)
-		} else {
-			// 多租户为true的情况
-			// 1. 先从当前租户配置获取
-			if c != nil {
-				result = getFieldValue(c, field)
-				if result != nil && result != "" && result != 0 {
-					return result
-				}
-			}
-
-			// 2. 然后从默认租户配置获取
-			result = getFieldValue(&toolsConfig.TenantsConfig.Defaults.Database, field)
-			if result != nil && result != "" && result != 0 {
-				return result
-			}
-
-			// 3. 最后从全局数据库配置获取
-			result = getFieldValue(toolsConfig.DatabaseConfig, field)
-		}
-
-		// 如果结果为nil或空值
-		if result == nil || result == "" || result == 0 {
-			// 如果是必需的配置项，报错
-			if required {
-				log.Fatalf("错误：无法从配置中获取 %s，请检查配置文件", field)
-			}
-			// 否则返回nil
-			return nil
-		}
-
-		return result
+// SetupTenantCasbin 通过 gRPC 初始化指定租户的 Casbin 策略
+// 用于单个租户的 Casbin 初始化（如动态添加新租户时）
+func SetupTenantCasbin(provider interface{}, tenantID int) error {
+	// 检查 provider 是否实现 PolicyProvider 接口
+	// 这里使用类型断言来验证 provider 是否符合接口要求
+	type policyProvider interface {
+		GetPolicies(ctx context.Context, tenantID int) ([]mycasbin.PolicyRule, error)
 	}
 
-	// 1. 获取所有配置值
-	// 获取数据库驱动（必需）
-	driverValue := getConfig("ProcessDB.Driver", true)
-	var driverStr string
-	if str, ok := driverValue.(string); ok {
-		driverStr = str
-	} else {
-		log.Fatalf("错误：ProcessDB.Driver 不是字符串类型：%v", driverValue)
+	pp, ok := provider.(policyProvider)
+	if !ok {
+		return fmt.Errorf("provider does not implement PolicyProvider interface")
 	}
 
-	// 设置全局驱动变量
-	if global.ProcessDriver == "" {
-		global.ProcessDriver = driverStr
-	}
-
-	// 获取数据库连接字符串（必需）
-	sourceValue := getConfig("ProcessDB.Source", true)
-	var sourceStr string
-	if str, ok := sourceValue.(string); ok {
-		sourceStr = str
-	} else {
-		log.Fatalf("错误：ProcessDB.Source 不是字符串类型：%v", sourceValue)
-	}
-
-	// 获取连接池配置（非必需，有默认值）
-	maxIdleConnsValue := getConfig("ProcessDB.MaxIdleConns", false)
-	maxOpenConnsValue := getConfig("ProcessDB.MaxOpenConns", false)
-	connMaxIdleTimeValue := getConfig("ProcessDB.ConnMaxIdleTime", false)
-	connMaxLifeTimeValue := getConfig("ProcessDB.ConnMaxLifeTime", false)
-
-	// 转换为整数类型，并设置默认值
-	maxIdleConns := 10 // 默认值
-	if maxIdleConnsValue != nil {
-		if val, ok := maxIdleConnsValue.(int); ok && val > 0 {
-			maxIdleConns = val
-		} else {
-			log.Printf("警告：ProcessDB.MaxIdleConns 不是有效的整数类型，使用默认值：%d", maxIdleConns)
-		}
-	}
-
-	maxOpenConns := 100 // 默认值
-	if maxOpenConnsValue != nil {
-		if val, ok := maxOpenConnsValue.(int); ok && val > 0 {
-			maxOpenConns = val
-		} else {
-			log.Printf("警告：ProcessDB.MaxOpenConns 不是有效的整数类型，使用默认值：%d", maxOpenConns)
-		}
-	}
-
-	connMaxIdleTime := 60 // 默认值
-	if connMaxIdleTimeValue != nil {
-		if val, ok := connMaxIdleTimeValue.(int); ok && val > 0 {
-			connMaxIdleTime = val
-		} else {
-			log.Printf("警告：ProcessDB.ConnMaxIdleTime 不是有效的整数类型，使用默认值：%d", connMaxIdleTime)
-		}
-	}
-
-	connMaxLifeTime := 3600 // 默认值
-	if connMaxLifeTimeValue != nil {
-		if val, ok := connMaxLifeTimeValue.(int); ok && val > 0 {
-			connMaxLifeTime = val
-		} else {
-			log.Printf("警告：ProcessDB.ConnMaxLifeTime 不是有效的整数类型，使用默认值：%d", connMaxLifeTime)
-		}
-	}
-
-	// 2. 检查配置值的有效性
-	// 检查驱动类型是否支持
-	if _, ok := opens[driverStr]; !ok {
-		log.Printf("警告：不支持的数据库驱动类型 %s，将使用默认的 postgres", driverStr)
-		driverStr = "postgres"
-	}
-
-	// 打印连接信息
-	log.Printf("%s => %s", tenantID, pkg.Green(sourceStr))
-
-	// 处理注册器
-	var registers []toolsDB.ResolverConfigure
-	if c != nil && len(c.ProcessDB.Registers) > 0 {
-		registers = make([]toolsDB.ResolverConfigure, len(c.ProcessDB.Registers))
-		for i := range c.ProcessDB.Registers {
-			registers[i] = toolsDB.NewResolverConfigure(
-				c.ProcessDB.Registers[i].Sources,
-				c.ProcessDB.Registers[i].Replicas,
-				c.ProcessDB.Registers[i].Policy,
-				c.ProcessDB.Registers[i].Tables)
-		}
-	} else {
-		registers = []toolsDB.ResolverConfigure{}
-	}
-
-	// 3. 使用配置值初始化数据库
-	resolverConfig := toolsDB.NewConfigure(
-		sourceStr,
-		maxIdleConns,
-		maxOpenConns,
-		connMaxIdleTime,
-		connMaxLifeTime,
-		registers)
-
-	// 使用带重试机制的连接函数
-	db, err := connectWithRetry("ProcessDB", driverStr, resolverConfig, &gorm.Config{
-		NamingStrategy: schema.NamingStrategy{
-			SingularTable: true,
-		},
-		Logger: mylogger.NewGormLogger(mylogger.Logger, toolsConfig.LoggerConfig.GormLoggerLevel),
-	})
-
+	e, err := mycasbin.SetupWithProvider(pp, tenantID)
 	if err != nil {
-		log.Fatalf(pkg.Red("%s connect error : %v\n"), driverStr, err)
-	} else {
-		log.Printf(pkg.Green("%s connect success ! \n"), driverStr)
+		return fmt.Errorf("casbin init via provider failed (租户 %d): %w", tenantID, err)
 	}
-
-	sdk.Runtime.SetTenantDB(tenantID, db)
-
-	// 只有在 dev 开发环境下才执行数据库迁移
-	if toolsConfig.ApplicationConfig.Mode == "dev" {
-		log.Println("数据库迁移开始（仅在 dev 环境执行）")
-		if err := db.Debug().AutoMigrate(&models.Migration{}); err != nil {
-			log.Println(pkg.Red("数据库迁移失败: %v\n"), err)
-		}
-
-		migration.Migrate.SetDb(db.Debug())
-		migration.Migrate.Migrate()
-		log.Println(`数据库基础数据初始化成功`)
-	} else {
-		log.Printf("当前环境为 %s，跳过数据库迁移（仅在 dev 环境执行迁移）\n", toolsConfig.ApplicationConfig.Mode)
-	}
+	sdk.Runtime.SetTenantCasbin(tenantID, e)
+	log.Printf("[Casbin] 租户 %d 策略初始化成功", tenantID)
+	return nil
 }
 
-// getFieldValue 通用获取字段值函数，支持Database和DatabaseDefaults类型
-func getFieldValue(config interface{}, field string) interface{} {
-	if config == nil {
-		return 0 // 返回0而不是空字符串
+// SetupAllTenantsCasbin 初始化所有租户的 Casbin 策略
+// 用于服务启动时批量初始化所有现有租户
+func SetupAllTenantsCasbin(provider interface{}, cache *tenantdb.Cache) error {
+	// 创建带超时的Context（最多等待5分钟）
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// 检查 provider 是否实现 PolicyProvider 接口
+	type policyProvider interface {
+		GetPolicies(ctx context.Context, tenantID int) ([]mycasbin.PolicyRule, error)
 	}
 
-	r := reflect.ValueOf(config)
-	if r.Kind() == reflect.Ptr {
-		if r.IsNil() {
-			return 0
+	pp, ok := provider.(policyProvider)
+	if !ok {
+		return fmt.Errorf("provider does not implement PolicyProvider interface")
+	}
+
+	tenantIDs := cache.GetTenantIDs()
+	if len(tenantIDs) == 0 {
+		log.Println("[Casbin] 无租户需要初始化")
+		return nil
+	}
+
+	log.Printf("[Casbin] 开始初始化 %d 个租户的策略", len(tenantIDs))
+
+	// 并发初始化
+	sem := make(chan struct{}, 5) // 最多 5 个并发
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var successCount, failCount int
+
+	for _, tenantID := range tenantIDs {
+		// 检查Context是否已取消
+		select {
+		case <-ctx.Done():
+			log.Printf("[Casbin] 初始化被取消: %v", ctx.Err())
+			wg.Wait() // 等待已启动的goroutine完成
+			return ctx.Err()
+		default:
 		}
-		r = r.Elem()
+
+		wg.Add(1)
+		go func(tid int) {
+			defer wg.Done()
+
+			// 获取信号量（支持Context取消）
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				mu.Lock()
+				failCount++
+				mu.Unlock()
+				return
+			}
+
+			err := SetupTenantCasbin(pp, tid)
+			mu.Lock()
+			if err != nil {
+				failCount++
+				log.Printf("[Casbin] 租户 %d 初始化失败: %v", tid, err)
+			} else {
+				successCount++
+				log.Printf("[Casbin] 租户 %d 初始化成功", tid)
+			}
+			mu.Unlock()
+		}(tenantID)
 	}
 
-	// 处理嵌套字段，如 "ProcessDB.Driver"
-	fields := strings.Split(field, ".")
-	current := r
+	wg.Wait()
 
-	for _, f := range fields {
-		if !current.IsValid() {
-			log.Printf("警告: 字段路径 %s 无效", field)
-			return 0
-		}
+	log.Printf("[Casbin] 初始化完成: 成功=%d, 失败=%d", successCount, failCount)
 
-		if current.Kind() == reflect.Struct {
-			current = current.FieldByName(f)
-		} else {
-			log.Printf("警告: 字段路径 %s 不是结构体", field)
-			return 0
-		}
+	if failCount > 0 {
+		return fmt.Errorf("部分租户 Casbin 初始化失败: %d/%d", failCount, len(tenantIDs))
 	}
-
-	if !current.IsValid() {
-		log.Printf("警告: 字段 %s 不存在", field)
-		return 0
-	}
-
-	return current.Interface()
-}
-
-// getIntConfig 获取整数类型配置
-func getIntConfig(c *toolsConfig.Database, field string, defaultValue int) int {
-	// 使用与setupSimpleDatabase中相同的逻辑获取配置
-	// 1. 如果多租户为false，直接从config.Database获取
-	if !toolsConfig.TenantsConfig.Enabled {
-		val := getFieldValue(toolsConfig.DatabaseConfig, field)
-		if intVal, ok := val.(int); ok && intVal != 0 {
-			return intVal
-		}
-		return defaultValue
-	}
-
-	// 2. 多租户为true的情况
-	// a. 先从当前租户配置获取
-	if c != nil {
-		val := getFieldValue(c, field)
-		if intVal, ok := val.(int); ok && intVal != 0 {
-			return intVal
-		}
-	}
-
-	// b. 然后从默认租户配置获取
-	val := getFieldValue(&toolsConfig.TenantsConfig.Defaults.Database, field)
-	if intVal, ok := val.(int); ok && intVal != 0 {
-		return intVal
-	}
-
-	// c. 最后从全局数据库配置获取
-	val = getFieldValue(toolsConfig.DatabaseConfig, field)
-	if intVal, ok := val.(int); ok && intVal != 0 {
-		return intVal
-	}
-
-	return defaultValue
+	return nil
 }

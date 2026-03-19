@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package bwc;
+
+option go_package = "jxt-evidence-system/security-management/equipment_management/interface/grpc/bwc/proto;proto";
+
+// 执法记录仪信息服务
+service BWCInfoService {
+  // 根据执法记录仪ID查询信息
+  rpc GetBWCById(GetBWCByIdReq) returns (BWCInfoReply) {}
+  // 根据执法记录仪编号查询信息
+  rpc GetBWCByNo(GetBWCByNoReq) returns (BWCInfoReply) {}
+  // 根据管理员ID查询执法记录仪列表
+  rpc GetBWCsByManagerId(GetBWCsByManagerIdReq) returns (BWCListReply) {}
+  // 根据领用人ID查询执法记录仪列表
+  rpc GetBWCsByRequisitionerId(GetBWCsByRequisitionerIdReq) returns (BWCListReply) {}
+}
+
+// 根据执法记录仪ID查询请求
+message GetBWCByIdReq {
+  int32 tenant_id = 1;  // 租户ID，用于多租户系统
+  int32 id = 2;         // 执法记录仪唯一ID
+}
+
+// 根据执法记录仪编号查询请求
+message GetBWCByNoReq {
+  int32 tenant_id = 1;  // 租户ID，用于多租户系统
+  string bwc_no = 2;         // 执法记录仪编号
+}
+
+// 根据管理员ID查询执法记录仪列表请求
+message GetBWCsByManagerIdReq {
+  int32 tenant_id = 1;  // 租户ID，用于多租户系统
+  int32 manager_id = 2;  // 管理员ID
+}
+
+// 根据领用人ID查询执法记录仪列表请求
+message GetBWCsByRequisitionerIdReq {
+  int32 tenant_id = 1;        // 租户ID，用于多租户系统
+  int32 requisitioner_id = 2;  // 领用人ID
+}
+
+// 执法记录仪信息响应，字段与领域模型BodyWornCameraAggregate对应
+message BWCInfoReply {
+  int32 id = 1;                              // 执法记录仪ID
+  string bwc_no = 2;                         // 执法记录仪编号
+  string bwc_name = 3;                       // 执法记录仪名称
+  int32 manager_id = 4;                      // 管理员ID
+  int32 manager_org_id = 5;                  // 管理员所在组织ID
+  string manager_name = 6;                   // 管理员名称
+  string manager_org_full_name = 7;          // 管理员所在组织全名称
+  int32 enable_use = 8;                      // 是否能被使用：1:可用; 2:不可用
+  int32 status = 9;                         // 状态：1:正常; 2:报废; 3:报修; 4:库存; 5:遗失
+  string cpu = 10;                          // CPU
+  int32 memory = 11;                         // 内存，单位：G
+  int32 disk = 12;                           // 存储，单位：G
+  string network_card = 13;                  // 网卡
+  int32 usb_num = 14;                        // USB数量
+  string system = 15;                        // 操作系统
+  string version = 16;                       // 版本
+  string purchase_time = 17;                 // 购买时间
+  string remark = 18;                        // 备注
+  int32 requisitioner_id = 19;               // 领用人ID
+
+  string created_at = 20;                    // 创建时间
+  string updated_at = 21;                    // 更新时间
+}
+
+// 执法记录仪列表响应
+message BWCListReply {
+  repeated BWCInfoReply bwcs = 1; // 执法记录仪列表
+  int64 total = 2;                           // 总数量
+}

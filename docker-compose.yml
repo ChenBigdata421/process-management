@@ -6,9 +6,9 @@ services:
     image: postgres:latest
     container_name: postgres-process-management
     environment:
-      POSTGRES_USER: root
+      POSTGRES_USER: tenant_1_process-management
       POSTGRES_PASSWORD: 123456
-      POSTGRES_DB: processdb
+      POSTGRES_DB: tenant_default_process
       TZ: Asia/Shanghai
       POSTGRES_SHARED_BUFFERS: 128MB
       POSTGRES_MAX_CONNECTIONS: 200
@@ -41,9 +41,7 @@ services:
       dockerfile: process-management/Dockerfile.api
     container_name: process-management-api
     environment:
-      # 数据库配置
-      DATABASE_URL: postgres://root:123456@postgres-process:5432/processdb?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
-      ADMIN_DATABASE_URL: postgres://root:123456@postgres-process:5432/postgres?sslmode=disable&connect_timeout=1&TimeZone=Asia/Shanghai
+      ENCRYPTION_KEY: "12345678901234567890123456789012"
       # 服务配置
       SERVER_PORT: :8003
       GIN_MODE: release

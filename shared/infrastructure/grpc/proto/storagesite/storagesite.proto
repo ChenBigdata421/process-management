@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package storagesite;
+
+option go_package = ".;proto";
+
+// 存储站点信息服务
+service StorageSiteInfoService {
+  // 根据存储站点ID查询信息
+  rpc GetStorageSiteById(GetStorageSiteByIdReq) returns (StorageSiteInfoReply) {}
+  // 根据存储站点编号查询信息
+  rpc GetStorageSiteByNo(GetStorageSiteByNoReq) returns (StorageSiteInfoReply) {}
+  // 根据存储站点名称查询信息
+  rpc GetStorageSiteByName(GetStorageSiteByNameReq) returns (StorageSiteInfoReply) {}
+  // 根据存储站点IP查询信息
+  rpc GetStorageSiteByIp(GetStorageSiteByIpReq) returns (StorageSiteInfoReply) {}
+}
+
+// 请求消息定义
+message GetStorageSiteByIdReq {
+  int32 tenant_id = 1;  // 租户ID
+  int32 id = 2;          // 存储站点ID
+}
+
+message GetStorageSiteByNoReq {
+  int32 tenant_id = 1;       // 租户ID
+  string storage_site_no = 2; // 存储站点编号
+}
+
+message GetStorageSiteByNameReq {
+  int32 tenant_id = 1;         // 租户ID
+  string storage_site_name = 2; // 存储站点名称
+}
+
+message GetStorageSiteByIpReq {
+  int32 tenant_id = 1;       // 租户ID
+  string storage_site_ip = 2; // 存储站点IP
+}
+
+// 响应消息定义 - 只暴露核心字段
+message StorageSiteInfoReply {
+  int32 id = 1;                        // 主键ID
+  string storage_site_no = 2;          // 存储站点编号
+  string storage_site_name = 3;        // 存储站点名称
+  string storage_site_ip = 4;          // IP地址
+  string storage_site_url = 5;         // 播放地址(HTTP)
+  int32 open_status = 6;               // 启用状态(0禁用/1启用)
+  string auth_key = 7;                 // 认证密钥
+}
+
