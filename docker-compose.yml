@@ -16,10 +16,10 @@ services:
       POSTGRES_WORK_MEM: 4MB
     volumes:
       - postgres_process_data:/var/lib/postgresql
-    ports:
-      - "5436:5432"
+    # ports:
+    #   - "5436:5432"
     networks:
-      - jxt-web
+      - process-data
     restart: unless-stopped
     deploy:
       resources:
@@ -55,6 +55,7 @@ services:
         condition: service_healthy
     networks:
       - jxt-web
+      - process-data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8003/api/health"]
@@ -78,6 +79,10 @@ volumes:
   postgres_process_data:
 
 networks:
+  process-data:
+    driver: bridge
+    internal: true
+    name: jxt-process-data
   jxt-web:
     external: true
     name: jxt-web
