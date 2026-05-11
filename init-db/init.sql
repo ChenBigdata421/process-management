@@ -1,0 +1,1 @@
+CREATE DATABASE tenant_cultural_relic_process;
