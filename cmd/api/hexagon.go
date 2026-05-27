@@ -8,6 +8,7 @@ import (
 	infra_ws "jxt-evidence-system/process-management/internal/infrastructure/websocket"
 	"jxt-evidence-system/process-management/internal/interfaces/rest/api"
 	"jxt-evidence-system/process-management/internal/interfaces/rest/router"
+	grpc_client "jxt-evidence-system/process-management/shared/infrastructure/grpc/client"
 )
 
 // jiyuanjie 注意import目录为正确的六边形架构的目录
@@ -23,5 +24,6 @@ func init() {
 	Registrations = append(Registrations, application.RegisterDependencies)
 	Registrations = append(Registrations, api.RegisterDependencies)
 	Registrations = append(Registrations, outbox.RegisterDependencies) // outbox依赖注册
+	Registrations = append(Registrations, grpc_client.RegisterDependencies)
 
 }
