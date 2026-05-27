@@ -100,11 +100,16 @@ func setup() {
 		if config.GrpcConfig.Client.Enabled {
 			watcherConfig.OnTenantAdded = func(tenantID int) error {
 				log.Printf("[Casbin] 动态租户 %d 开始初始化", tenantID)
-				if err := di.Invoke(func(provider *grpc_client.GrpcCasbinPolicyProvider) error {
-					return database.SetupTenantCasbin(provider, tenantID)
+				var setupErr error
+				if err := di.Invoke(func(provider *grpc_client.GrpcCasbinPolicyProvider) {
+					setupErr = database.SetupTenantCasbin(provider, tenantID)
 				}); err != nil {
-					log.Printf("[Casbin] 动态租户 %d 初始化失败: %v", tenantID, err)
+					log.Printf("[Casbin] 动态租户 %d 初始化失败(DI): %v", tenantID, err)
 					return err
+				}
+				if setupErr != nil {
+					log.Printf("[Casbin] 动态租户 %d 初始化失败: %v", tenantID, setupErr)
+					return setupErr
 				}
 				log.Printf("[Casbin] 动态租户 %d 初始化成功", tenantID)
 				return nil
@@ -395,6 +400,13 @@ func gracefulShutdown() error {
 	if err := database.Close(shutdownCtx); err != nil {
 		log.Printf("Error closing database: %v\n", err)
 	}
+
+	// 关闭 gRPC 连接
+	_ = di.Invoke(func(cm *grpc_client.ConnectionManager) {
+		if err := cm.Close(); err != nil {
+			log.Printf("Error closing gRPC connection: %v\n", err)
+		}
+	})
 
 	return nil
 }

@@ -14,6 +14,10 @@ var registerOnce sync.Once
 // RegisterDependencies 注册所有 gRPC 客户端依赖
 func RegisterDependencies() {
 	registerOnce.Do(func() {
+		if !config.GrpcConfig.Client.Enabled {
+			logger.Info("gRPC客户端已禁用，跳过依赖注册")
+			return
+		}
 		registerConnectionManager()
 		registerCasbinPolicyProvider()
 	})

@@ -3,7 +3,6 @@ package grpc_client
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	mycasbin "github.com/ChenBigdata421/jxt-core/sdk/pkg/casbin"
 	"github.com/ChenBigdata421/jxt-core/sdk/pkg/logger"
@@ -15,8 +14,6 @@ import (
 // Provides Casbin policies via gRPC calls to security-management service
 type GrpcCasbinPolicyProvider struct {
 	connManager *ConnectionManager
-	client      pb.CasbinPolicyServiceClient
-	initOnce    sync.Once
 }
 
 // NewGrpcCasbinPolicyProvider creates a new gRPC-based Casbin policy provider
@@ -24,6 +21,12 @@ func NewGrpcCasbinPolicyProvider(connManager *ConnectionManager) *GrpcCasbinPoli
 	return &GrpcCasbinPolicyProvider{
 		connManager: connManager,
 	}
+}
+
+// getClient creates a fresh CasbinPolicyServiceClient from the current connection.
+// Called on every GetPolicies to avoid stale clients after reconnection.
+func (p *GrpcCasbinPolicyProvider) getClient() pb.CasbinPolicyServiceClient {
+	return pb.NewCasbinPolicyServiceClient(p.connManager.GetConnection())
 }
 
 // GetPolicies retrieves all policy rules for the specified tenant via gRPC
@@ -37,22 +40,12 @@ func (p *GrpcCasbinPolicyProvider) GetPolicies(ctx context.Context, tenantID int
 		return nil, fmt.Errorf("tenant ID overflow: %d (exceeds int32 max)", tenantID)
 	}
 
-	// Lazy initialization of gRPC client
-	p.initOnce.Do(func() {
-		p.client = pb.NewCasbinPolicyServiceClient(p.connManager.GetConnection())
-		logger.Info("Casbin 策略服务客户端初始化完成")
-	})
-
-	if p.client == nil {
-		return nil, fmt.Errorf("casbin policy client not initialized")
-	}
-
 	req := &pb.GetPoliciesRequest{TenantId: int32(tenantID)}
 
 	var resp *pb.GetPoliciesResponse
 	err := p.connManager.ExecuteWithNetworkRetry(ctx, func() error {
 		var err error
-		resp, err = p.client.GetPolicies(ctx, req)
+		resp, err = p.getClient().GetPolicies(ctx, req)
 		return err
 	})
 
