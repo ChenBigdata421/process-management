@@ -1,11 +1,10 @@
 module jxt-evidence-system/process-management/tests
 
-go 1.24.0
-
-toolchain go1.24.7
+go 1.26.0
 
 require (
 	github.com/golang-jwt/jwt/v4 v4.5.0
+	github.com/google/uuid v1.6.0
 	github.com/onsi/ginkgo/v2 v2.25.1
 	github.com/onsi/gomega v1.38.2
 	gorm.io/driver/postgres v1.5.4

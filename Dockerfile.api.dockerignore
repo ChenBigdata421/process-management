@@ -1,0 +1,25 @@
+# =============================================================================
+# Per-Dockerfile ignore for process-management/Dockerfile.api
+#
+# The build context is the repo root (jxt-evidence-system/), but this Dockerfile
+# only ever COPYs the process-management/ tree. The repo-root .dockerignore is
+# tuned for the jxt-benchmark build and explicitly excludes process-management/,
+# which would otherwise empty this build's context.
+#
+# BuildKit gives <Dockerfile-name>.dockerignore precedence over the root
+# .dockerignore, so here we re-include the process-management/ tree (tests/
+# included, since go.work references ./tests and the build runs in workspace
+# mode) and keep every unrelated sibling excluded to keep the context small.
+# The jxt-benchmark build is untouched — it still uses the root .dockerignore.
+# =============================================================================
+
+# Exclude everything under the repo root ...
+*
+# ... then re-include only the process-management tree.
+!process-management
+!process-management/**
+
+# Universal cruft inside the included tree (never needed to compile).
+process-management/.git
+process-management/**/.git/
+process-management/**/node_modules/
