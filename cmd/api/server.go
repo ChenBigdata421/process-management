@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	ws "jxt-evidence-system/process-management/internal/domain/aggregate/task/websocket"
+	infra_eventbus "jxt-evidence-system/process-management/internal/infrastructure/eventbus"
 	localoutbox "jxt-evidence-system/process-management/internal/infrastructure/outbox"
 	"jxt-evidence-system/process-management/shared/common/database"
 	"jxt-evidence-system/process-management/shared/common/di"
@@ -345,16 +346,12 @@ func initRouter() {
 		log.Fatal("not support other engine")
 		//os.Exit(-1)
 	}
-	if config.SslConfig.Enable {
-		r.Use(handler.TlsHandler())
-	}
-	//r.Use(middleware.Metrics())
-	r.Use(common.Sentinel()).
-		Use(logger.SetRequestLogger) //jiyuanjie 创建基于基础zapLogger的requestLogger
 
-	common.InitMiddleware(r, tenantCache)
-
-	// 注册健康检查端点（无需认证）
+	// 注册健康检查端点（无需认证、无需租户解析）。
+	// 必须在 common.InitMiddleware（含域名租户回退中间件）之前注册：
+	// Gin 路由只会绑定其注册之前通过 r.Use 挂载的中间件；若放在后面，
+	// /api/health 会被 host 解析的租户回退中间件拦截（域名无法解析即返回
+	// 400 "tenant ID missing"），导致 Docker healthcheck 探针失败、容器被判为 unhealthy。
 	r.GET("/api/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"code": 0,
@@ -364,6 +361,15 @@ func initRouter() {
 			},
 		})
 	})
+
+	if config.SslConfig.Enable {
+		r.Use(handler.TlsHandler())
+	}
+	//r.Use(middleware.Metrics())
+	r.Use(common.Sentinel()).
+		Use(logger.SetRequestLogger) //jiyuanjie 创建基于基础zapLogger的requestLogger
+
+	common.InitMiddleware(r, tenantCache)
 
 }
 
@@ -429,28 +435,26 @@ func setupEventBus() error {
 	bus := eventbus.GetGlobal()
 	sdk.Runtime.SetEventBus(bus)
 
+	// ========== v4 动作1:注册表驱动 ==========
+	reg := buildEventRegistry()
+
 	// ✅ Kafka 预订阅优化（避免 Consumer Group 重平衡）
 	if eventBusConfig.Type == "kafka" {
-		topics := []string{
-			// Evidence 自身的 Topics
-			"process.task.events",
-		}
 		//尝试将 bus 断言为具有 SetPreSubscriptionTopics 方法的接口
 		if kafkaBus, ok := bus.(interface{ SetPreSubscriptionTopics([]string) }); ok {
-			kafkaBus.SetPreSubscriptionTopics(topics)
-			logger.Info("✅ Kafka 预订阅 topic 已设置", "count", len(topics))
+			kafkaBus.SetPreSubscriptionTopics(reg.Topics())
+			logger.Info("✅ Kafka 预订阅 topic 已设置", "count", len(reg.Topics()))
 		}
 	}
 
 	logger.Info("EventBus initialized successfully", "type", eventBusConfig.Type)
 
-	// ========== ✅ Topic 预创建优化 ==========
-	if err := preCreateTopics(bus); err != nil {
-		// 预创建失败不影响启动，只记录警告
-		logger.Warn("Topic pre-creation failed", "error", err)
+	// ========== ✅ 就绪门禁 + §七 存在性断言（topic 配置由 infra bootstrap 落地，v2 §十七） ==========
+	if err := waitTopologyReady(bus, reg.Topics()); err != nil {
+		// fail-fast：topology 未就绪即拒启动——由 restart: on-failure 重试
+		return fmt.Errorf("waitTopologyReady failed: %w", err)
 	}
 
-	logger.Info("EventBus initialized successfully", "type", eventBusConfig.Type)
 	return nil
 }
 
@@ -472,51 +476,31 @@ func startOutboxScheduler() error {
 	})
 }
 
-// preCreateTopics 预创建所有 Kafka Topics（可选，Kafka 支持自动创建）
-//
-// 优化原理：
-// - 在应用启动时预先创建所有 Topic
-// - 避免运行时自动创建导致的延迟
-// - 可以预设 Topic 配置（分区数、压缩算法等）
-//
-// 参考文档：docs/消息中间件切换到kafka/02-设计方案.md
-func preCreateTopics(bus eventbus.EventBus) error {
+// waitTopologyReady 在订阅之前【单次】检查 redpanda topology 就绪哨兵 jxt.topology.ready，
+// 通过后对 owned topic 做 §七 存在性断言。topic 存在性/分区数/留存期/压缩配置全部由 infra
+// bootstrap 收敛（docs/analysis/redpanda主题创建优化方案_v2.md 改动 4/6 + §十七）：标志存在 ⟹
+// 最近一次 bootstrap exit 0 ⟹ 全部主题已建好并配置 → 本服务不再断言分区数、不再 ConfigureTopic。
+// 标志缺失即返回错误 → setupEventBus → log.Fatalf → restart: on-failure 重试。
+func waitTopologyReady(bus eventbus.EventBus, topics []string) error {
 	ctx := context.Background()
 
-	// 1. 定义所有需要使用的 Topic（与 TopicMapper 保持一致）
-	topics := []string{
-		// Evidence 自身的 Topics
-		"process.task.events", // Media 聚合事件
+	// 【就绪门禁 / 形态乙】检查 jxt.topology.ready 哨兵：标志存在 ⟹ 最近一次 bootstrap 成功
+	// ⟹ 全部主题已建好并配置。(E3) 走 metadata 只读查询，禁止 produce/consume 触发式探测。
+	if err := eventbus.WaitForTopologyReady(ctx, bus); err != nil {
+		return fmt.Errorf("redpanda topology not ready: %w", err)
 	}
+	logger.Info("✅ redpanda topology 就绪（jxt.topology.ready 存在）")
 
-	logger.Infof("🚀 开始预创建 %d 个 Kafka Topics...", len(topics))
-	startTime := time.Now()
+	// §七 启动期存在性断言：代码要订阅的 topic 必须已由 bootstrap 建好，缺失即 fail-fast
+	// 并指名道姓给出修复指令。断言逻辑已上提 jxt-core WaitForTopicsExist（消除 4 服务重复）。
+	logger.Infof("🔍 存在性断言 %d 个 topics...", len(topics))
+	return eventbus.WaitForTopicsExist(ctx, bus, topics)
+}
 
-	// 2. 预创建所有 Topics
-	successCount := 0
-	for _, topic := range topics {
-		err := bus.ConfigureTopic(ctx, topic, eventbus.TopicOptions{
-			PersistenceMode: eventbus.TopicPersistent, // 持久化模式
-			RetentionTime:   168 * time.Hour,          // 7 天
-			MaxSize:         1073741824,               // 1GB
-			Partitions:      1,                        // 单分区保证顺序
-			Compression:     "snappy",                 // Snappy 压缩
-			Description:     fmt.Sprintf("Evidence management topic for %s", topic),
-		})
-		if err != nil {
-			logger.Warnf("⚠️  预创建 Topic 失败: %s - %v", topic, err)
-		} else {
-			logger.Infof("  ✅ Topic 预创建成功: %s", topic)
-			successCount++
-		}
-	}
-
-	elapsed := time.Since(startTime)
-	logger.Infof("✅ Topic 预创建完成！成功: %d/%d, 耗时: %v", successCount, len(topics), elapsed)
-
-	if successCount == 0 {
-		return fmt.Errorf("所有 Topic 预创建失败")
-	}
-
-	return nil
+// buildEventRegistry 构造 process-management 的 topic 注册表(v4 动作1)。
+// process.task.events 为本服务拥有(发布侧,单分区保序)。
+func buildEventRegistry() *infra_eventbus.Registry {
+	reg := infra_eventbus.NewRegistry()
+	reg.Register("process.task.events")
+	return reg
 }

@@ -38,4 +38,7 @@ workflow.db
 *.log
 .env
 .env.local
+*.md
+*.ps1
+*.sh
 
