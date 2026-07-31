@@ -16,12 +16,14 @@ WORKDIR /app
 COPY process-management/go.mod ./go.mod
 COPY process-management/go.sum ./go.sum
 
-# 清理和下载所有该模块所需的依赖
-RUN go mod tidy
-RUN go mod download all
+
 
 # 复制源码
 COPY process-management/ .
+
+# 清理和下载所有该模块所需的依赖
+RUN go mod tidy
+RUN go mod download all
 
 # 编译可执行文件（入口在仓库根目录的 main.go）
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -a -installsuffix cgo -o process-management .

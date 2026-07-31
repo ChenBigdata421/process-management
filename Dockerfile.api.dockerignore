@@ -2,36 +2,24 @@
 # Per-Dockerfile ignore for process-management/Dockerfile.api
 #
 # The build context is the repo root (jxt-evidence-system/). This Dockerfile
-# COPYs TWO trees:
-#   - process-management/   (the service source)
-#   - jxt-core/             (local checkout; go.mod uses
-#                            `replace github.com/ChenBigdata421/jxt-core => ../jxt-core`,
-#                            which resolves to /jxt-core inside the image)
+# only COPYs the service source tree:
+#   - process-management/   (go.mod depends on the published jxt-core v1.7.0;
+#                            there is no local `replace` directive and no
+#                            go.work, so neither jxt-core/ nor tests/ need to
+#                            be in the build context)
 #
-# The repo-root .dockerignore is tuned for the jxt-benchmark build and excludes
-# BOTH process-management/ and jxt-core/, which would otherwise empty this
-# build's context (and break the local-jxt-core COPY).
-#
-# BuildKit gives <Dockerfile-name>.dockerignore precedence over the root
-# .dockerignore, so here we re-include the process-management/ and jxt-core/
-# trees and keep every unrelated sibling excluded to keep the context small.
-# tests/ is intentionally included: go.work uses ./tests, so the build runs in
-# workspace mode and needs the tests module in context.
-# The jxt-benchmark build is untouched — it still uses the root .dockerignore.
+# BuildKit uses <Dockerfile-name>.dockerignore in place of the repo-root
+# .dockerignore, so here we exclude everything at the repo root and re-include
+# only the process-management/ tree, keeping the context small.
 # =============================================================================
 
 # Exclude everything under the repo root ...
 *
-# ... then re-include only the trees this Dockerfile COPYs.
+# ... then re-include only the tree this Dockerfile COPYs.
 !process-management
 !process-management/**
-!jxt-core
-!jxt-core/**
 
-# Universal cruft inside the included trees (never needed to compile).
+# Universal cruft inside the included tree (never needed to compile).
 process-management/.git
 process-management/**/.git/
 process-management/**/node_modules/
-jxt-core/.git
-jxt-core/**/.git/
-jxt-core/**/node_modules/
