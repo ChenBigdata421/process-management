@@ -247,13 +247,10 @@ func (m *OutboxSchedulerManager) GetSchedulerCount() int {
 	return len(m.schedulers)
 }
 
-// createScheduler 创建单个 Scheduler 和 Publisher
-func (m *OutboxSchedulerManager) createScheduler(tenantID int, db *gorm.DB) (*outbox.OutboxScheduler, *outbox.OutboxPublisher) {
-	// 创建租户专属的 Repository
-	repo := gormadapter.NewGormOutboxRepository(db)
-
-	// 创建调度器配置
-	schedulerConfig := &outbox.SchedulerConfig{
+// buildSchedulerConfig 构造单个租户的 outbox 调度器配置（纯函数，不依赖 *gorm.DB）。
+// 拆出 createScheduler 以便单测直接断言 DLQ 配置，无需伪造 DB（同 security/evidence 的做法）。
+func buildSchedulerConfig(tenantID int) *outbox.SchedulerConfig {
+	return &outbox.SchedulerConfig{
 		PollInterval:        1 * time.Second,  // 轮询间隔 1 秒（jxt-core 最小值）
 		BatchSize:           100,              // 每次处理 100 个事件
 		TenantID:            tenantID,         // 租户 ID（int 类型）
@@ -266,8 +263,42 @@ func (m *OutboxSchedulerManager) createScheduler(tenantID int, db *gorm.DB) (*ou
 		EnableRetry:         true,             // 启用失败重试
 		RetryInterval:       30 * time.Second, // 重试间隔 30 秒
 		MaxRetries:          3,                // 最大重试次数 3 次
-		EnableDLQ:           false,            // 禁用死信队列
+		// PR-6 (M2/C1): 开启 publish-side 死信终态 + 通知扫描。max_retry 行将一次性 CAS 到
+		// dead_lettered、通知一次（Handle + Alert），随后不再被重扫（C1 修复）。
+		EnableDLQ:   true,
+		DLQInterval: 5 * time.Minute, // jxt-core C3 下限 1s；5min 与其他服务默认一致
+		// R1 (P0): 不要用 outbox.NewLoggingDLQHandler() —— 它把 event.LastError 原样写日志，
+		// 携带 DSN 密码 / broker token / SQL 字面量（spec §10 要求脱敏）。process 没有指标包
+		// （D-PROC-2），因此 Handle 仅做脱敏日志，用 jxt-core 共享的 outbox.SanitizeLastError。
+		// R12: 用结构化 logger（本文件第 10 行已 import），而非 stdlib log.Printf。
+		DLQHandler: outbox.DLQHandlerFunc(func(_ context.Context, e *outbox.OutboxEvent) error {
+			id, tenant, et, le := "", 0, "", ""
+			if e != nil {
+				id, tenant, et, le = e.ID, e.TenantID, e.EventType, outbox.SanitizeLastError(e.LastError)
+			}
+			logger.Warnf("[OUTBOX-DLQ] process dead letter: event_id=%s tenant=%d type=%s last_error=%q", id, tenant, et, le)
+			return nil
+		}),
+		// C2: P1 告警通道 —— 即使 Handle 出错/panic 也照常触发（jxt-core processOneDLQ 保证）。
+		// process 当前无日志聚合把这条日志路由到 ops，是 D-PROC-2 延迟项最锋利的边（见 runbook）。
+		DLQAlertHandler: outbox.DLQAlertHandlerFunc(func(_ context.Context, e *outbox.OutboxEvent) error {
+			id, tenant, et := "", 0, ""
+			if e != nil {
+				id, tenant, et = e.ID, e.TenantID, e.EventType
+			}
+			logger.Warnf("[OUTBOX-DLQ][P1] process dead letter requires review: event_id=%s tenant=%d type=%s", id, tenant, et)
+			return nil
+		}),
 	}
+}
+
+// createScheduler 创建单个 Scheduler 和 Publisher
+func (m *OutboxSchedulerManager) createScheduler(tenantID int, db *gorm.DB) (*outbox.OutboxScheduler, *outbox.OutboxPublisher) {
+	// 创建租户专属的 Repository
+	repo := gormadapter.NewGormOutboxRepository(db)
+
+	// 创建调度器配置
+	schedulerConfig := buildSchedulerConfig(tenantID)
 
 	// 创建发布器配置
 	publisherConfig := &outbox.PublisherConfig{
