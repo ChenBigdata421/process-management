@@ -5,7 +5,6 @@ package outbox_test
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -117,5 +116,3 @@ func TestOutboxDLQ_MaxRetryToDeadLetteredToNotified(t *testing.T) {
 type countingHandler struct{ calls int }
 
 func (c *countingHandler) Handle(_ context.Context, _ *outbox.OutboxEvent) error { c.calls++; return nil }
-
-var _ = fmt.Sprintf
