@@ -99,7 +99,7 @@ eventbus:
     
     # Consumer 配置
     consumer:
-      groupId: "evidence-command-consumer-group"  # ASCII only
+      groupId: "process-management-consumer-group"  # distinct from evidence-command (PR-6 §9)
       clientId: "evidence-command-consumer"  # ASCII only
       autoOffsetReset: "earliest"  # 从最早的消息开始消费
       enableAutoCommit: false  # 手动提交 offset
