@@ -55,7 +55,7 @@ func (h *Hub) Run() {
 			}
 			h.clients[client.UserID][client] = true
 			h.mu.Unlock()
-			log.Printf("[WebSocket] Client registered: user=%s, total=%d", client.UserID, len(h.clients[client.UserID]))
+			log.Printf("[WebSocket] Client registered: user=%d, total=%d", client.UserID, len(h.clients[client.UserID]))
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -69,7 +69,7 @@ func (h *Hub) Run() {
 				}
 			}
 			h.mu.Unlock()
-			log.Printf("[WebSocket] Client unregistered: user=%s", client.UserID)
+			log.Printf("[WebSocket] Client unregistered: user=%d", client.UserID)
 
 		case message := <-h.broadcast:
 			h.mu.RLock()
@@ -77,7 +77,7 @@ func (h *Hub) Run() {
 			h.mu.RUnlock()
 
 			if len(clients) == 0 {
-				log.Printf("[WebSocket] No clients for user: %s", message.UserID)
+				log.Printf("[WebSocket] No clients for user: %d", message.UserID)
 				continue
 			}
 
@@ -92,7 +92,7 @@ func (h *Hub) Run() {
 			for client := range clients {
 				select {
 				case client.send <- data:
-					log.Printf("[WebSocket] Message sent to user: %s, type: %s", message.UserID, message.Type)
+					log.Printf("[WebSocket] Message sent to user: %d, type: %s", message.UserID, message.Type)
 				default:
 					// 发送失败，关闭连接
 					h.mu.Lock()
@@ -102,7 +102,7 @@ func (h *Hub) Run() {
 						delete(h.clients, message.UserID)
 					}
 					h.mu.Unlock()
-					log.Printf("[WebSocket] Client send buffer full, closing: user=%s", message.UserID)
+					log.Printf("[WebSocket] Client send buffer full, closing: user=%d", message.UserID)
 				}
 			}
 		}
@@ -120,9 +120,9 @@ func (h *Hub) SendToUser(userID int, msgType string, data map[string]interface{}
 
 	select {
 	case h.broadcast <- message:
-		log.Printf("[WebSocket] Message queued for user: %s, type: %s", userID, msgType)
+		log.Printf("[WebSocket] Message queued for user: %d, type: %s", userID, msgType)
 	default:
-		log.Printf("[WebSocket] Broadcast channel full, message dropped for user: %s", userID)
+		log.Printf("[WebSocket] Broadcast channel full, message dropped for user: %d", userID)
 	}
 }
 

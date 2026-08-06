@@ -70,7 +70,7 @@ func (c *Client) readPump() {
 		}
 
 		// 处理客户端发来的消息（如果需要）
-		log.Printf("[WebSocket] Received message from user %s: %s", c.UserID, string(message))
+		log.Printf("[WebSocket] Received message from user %d: %s", c.UserID, string(message))
 	}
 }
 
