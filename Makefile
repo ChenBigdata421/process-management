@@ -1,4 +1,4 @@
-.PHONY: help build run run-worker clean test docker-build docker-up docker-down docker-logs docker-ps
+.PHONY: help build run run-worker clean test docker-build docker-up docker-down docker-logs docker-ps test-outbox-system
 
 help:
 	@echo "Process Management - Makefile Commands"
@@ -75,4 +75,10 @@ clean:
 test:
 	@echo "运行测试..."
 	go test -v ./...
+
+# PR-6 outbox dead_lettered 系统测试（//go:build system）。需要 PROCESS_MYSQL_DSN；未设置时
+# 测试 t.Skip 干净退出（单元测试仍是 per-commit 门禁；本目标对真实迁移 DB 在合并前跑）。
+test-outbox-system:
+	@echo "==> PR-6 outbox dead_lettered system test (needs PROCESS_MYSQL_DSN; skips if unset)"
+	go test -tags=system ./internal/infrastructure/outbox/ -run TestOutboxDLQ -v
 
