@@ -3,7 +3,7 @@ module jxt-evidence-system/process-management
 go 1.26.0
 
 require (
-	github.com/ChenBigdata421/jxt-core v1.7.5
+	github.com/ChenBigdata421/jxt-core v1.7.8
 	github.com/alibaba/sentinel-golang v1.0.4
 	github.com/alibaba/sentinel-golang/pkg/adapters/gin v0.0.0-20250702131350-f7a7f9575711
 	github.com/bytedance/go-tagexpr/v2 v2.7.12
